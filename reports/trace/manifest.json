@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "provider": "gemini",
+  "family": "gemini",
+  "model": "gemini-3.5-flash",
+  "fallback_models": [
+    "gemini-3.5-flash-lite"
+  ],
+  "profile": "standard",
+  "max_context_chars": 120000,
+  "env": {}
+}
