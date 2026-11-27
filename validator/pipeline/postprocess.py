@@ -548,6 +548,13 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                 if c.two_quote_contradiction:
                     c.confirmed = True
                     continue
+                anchored = all(e.quote_status == QuoteStatus.ANCHORED for e in c.evidence)
+                if c.severity != Severity.MINOR and not anchored:
+                    # a verified major finding is not removed without proof: it stays as minor
+                    c.severity = Severity.MINOR
+                    c.confirmed = True
+                    c.review_note = "критик счёл находку несущественной; критичность понижена до незначительной"
+                    continue
                 dropped.add(c.cid)
                 stats.dropped_by_review += 1
             else:

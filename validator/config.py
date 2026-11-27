@@ -100,7 +100,7 @@ class Settings:
             retry_base_seconds=_float("LLM_RETRY_BASE_SECONDS", 8.0),
             profile_name=profile,
             # deep reasoning answers on the paid provider take longer than one free-tier attempt
-            timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 300.0 if provider == "anthropic" else 180.0),
+            timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 300.0 if provider == "anthropic" else 240.0),
             run_deadline_seconds=_float("RUN_DEADLINE_SECONDS", 480.0),
             max_calls=int(max_calls) if max_calls else None,
             max_output_tokens=_int("LLM_MAX_OUTPUT_TOKENS", 32000),

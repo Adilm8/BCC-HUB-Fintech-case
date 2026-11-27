@@ -48,6 +48,7 @@ class LLMReqFinding(BaseModel):
 
 class LLMReqResult(BaseModel):
     requirement_id: str
+    checklist: str  # short pass over the completeness checklist, written before the findings
     findings: list[LLMReqFinding]
 
 
@@ -79,7 +80,13 @@ class LLMCoverage(BaseModel):
     note: str
 
 
+class LLMLedgerItem(BaseModel):
+    concept: str
+    mentions: str  # every place the concept appears, with what each place says
+
+
 class LLMSetCheck(BaseModel):
+    ledger: list[LLMLedgerItem]
     findings: list[LLMSetFinding]
     coverage: list[LLMCoverage]
 

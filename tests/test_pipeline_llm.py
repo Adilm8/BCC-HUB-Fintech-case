@@ -1,4 +1,5 @@
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -85,3 +86,26 @@ def test_all_models_fail_reports_last_kind():
 def test_strip_schema_keys():
     s = {"type": "array", "maxItems": 3, "items": {"type": "object", "maxItems": 1}}
     assert strip_schema_keys(s, ("maxItems",)) == {"type": "array", "items": {"type": "object"}}
+
+
+def test_gemini_thinking_level_falls_back_when_rejected(monkeypatch):
+    from validator.llm import GeminiClient
+
+    calls = []
+
+    class Models:
+        def generate_content(self, model, contents, config):
+            calls.append(config.thinking_config)
+            if config.thinking_config is not None:
+                raise RuntimeError("400 INVALID_ARGUMENT thinking_level is not supported")
+
+            return SimpleNamespace(text='{"ok": true}', candidates=[], usage_metadata=None)
+
+    c = GeminiClient.__new__(GeminiClient)
+    LLMClient.__init__(c, _settings())
+    c._client = type("C", (), {"models": Models()})()
+    c._no_thinking = set()
+    r = c.complete("p", effort="high")
+    assert r.text == '{"ok": true}' and calls[0] is not None and calls[-1] is None
+    c.complete("p", effort="high")
+    assert calls[-1] is None and len(calls) == 3  # the model is remembered as not accepting it

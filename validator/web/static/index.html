@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Проверка требований — ISO/IEC/IEEE 29148 и IEEE 830</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к основному содержимому</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✓</div>
+        <div class="brand-text">
+          <h1 class="brand-title">Проверка требований</h1>
+          <p class="brand-subtitle">Статический анализ спецификаций по стандартам ISO/IEC/IEEE 29148:2018 и IEEE 830-1998</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <span id="health-badge" class="status-pill status-pill--neutral" aria-live="polite">Проверка статуса…</span>
+        <button id="new-check-btn" type="button" class="btn btn-secondary btn-sm hidden">Новая проверка</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container main-content">
+    <div id="config-warning" class="alert alert--warning hidden" role="status">
+      <strong class="alert-title">Ключ доступа на сервере не настроен.</strong>
+      <span class="alert-body">Для запуска анализа настройте переменные окружения сервера и перезапустите приложение.</span>
+    </div>
+
+    <div id="error-banner" class="alert alert--critical hidden" role="alert">
+      <div class="alert-content">
+        <strong class="alert-title">Ошибка</strong>
+        <span id="error-banner-text" class="alert-body"></span>
+      </div>
+      <button id="error-dismiss-btn" type="button" class="btn-icon" aria-label="Скрыть сообщение об ошибке">✕</button>
+    </div>
+
+    <section id="upload-section" class="card upload-card" aria-labelledby="upload-heading">
+      <div class="section-head">
+        <h2 id="upload-heading" class="section-title">Загрузка документа требований</h2>
+        <p class="section-desc">Поддерживаются файлы .md, .txt, .pdf и .docx размером до 10 МБ.</p>
+      </div>
+
+      <div
+        id="drop-zone"
+        class="drop-zone"
+        aria-label="Зона перетаскивания файла требований"
+      >
+        <input
+          id="file-input"
+          class="sr-only"
+          type="file"
+          accept=".md,.txt,.pdf,.docx"
+        >
+        <div class="drop-zone-icon" aria-hidden="true">↑</div>
+        <p class="drop-zone-title">Перетащите файл сюда или выберите на компьютере</p>
+        <p class="drop-zone-hint">.md · .txt · .pdf · .docx · не более 10 МБ</p>
+        <div class="drop-zone-actions">
+          <button id="select-file-btn" type="button" class="btn btn-primary">Выбрать файл</button>
+          <button id="sample-btn" type="button" class="btn btn-secondary">Проверить пример</button>
+        </div>
+      </div>
+
+      <div class="upload-options">
+        <label class="field-inline" for="profile-select">
+          <span class="field-label">Профиль проверки:</span>
+          <select id="profile-select" class="select-input">
+            <option value="">По умолчанию</option>
+            <option value="economy">economy — минимум вызовов</option>
+            <option value="standard">standard — сбалансированный</option>
+            <option value="deep">deep — подробный разбор</option>
+          </select>
+        </label>
+        <span id="selected-file-label" class="muted-note" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section id="progress-section" class="card progress-card hidden" aria-labelledby="progress-heading" aria-live="polite">
+      <div class="progress-head">
+        <div>
+          <h2 id="progress-heading" class="section-title">Выполнение проверки</h2>
+          <p id="progress-doc-name" class="mono-meta"></p>
+        </div>
+        <div class="progress-stats">
+          <span id="progress-percent" class="progress-percent">0%</span>
+          <span id="progress-elapsed" class="muted-note tabular">0 с</span>
+        </div>
+      </div>
+
+      <div
+        id="progress-bar-track"
+        class="progress-track"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+        aria-label="Прогресс этапов проверки"
+      >
+        <div id="progress-bar-fill" class="progress-fill"></div>
+      </div>
+
+      <ol id="stage-list" class="stage-list"></ol>
+    </section>
+
+    <section id="result-section" class="result-section hidden" aria-labelledby="result-doc-title">
+      <div id="partial-banner" class="alert alert--warning hidden" role="status">
+        <div class="alert-content">
+          <strong id="partial-banner-title" class="alert-title"></strong>
+          <ul id="partial-banner-list" class="alert-list"></ul>
+        </div>
+      </div>
+
+      <div class="card result-header-card">
+        <div class="result-header-main">
+          <div>
+            <h2 id="result-doc-title" class="result-title"></h2>
+            <div id="result-meta" class="result-meta"></div>
+          </div>
+          <div class="result-actions">
+            <a id="download-md-btn" class="btn btn-primary btn-sm" href="#" download>Скачать .md</a>
+            <a id="download-json-btn" class="btn btn-secondary btn-sm" href="#" download>Скачать .json</a>
+          </div>
+        </div>
+      </div>
+
+      <section id="verdict-banner" class="card verdict-card" aria-labelledby="verdict-heading">
+        <div class="verdict-top">
+          <div class="verdict-headline-wrap">
+            <span class="eyebrow">Итоговый вердикт</span>
+            <h3 id="verdict-heading" class="verdict-headline"></h3>
+          </div>
+          <div class="readiness-group">
+            <div class="readiness-item">
+              <span class="readiness-label">Разработка</span>
+              <span id="readiness-dev" class="chip"></span>
+            </div>
+            <div class="readiness-item">
+              <span class="readiness-label">Тестирование</span>
+              <span id="readiness-test" class="chip"></span>
+            </div>
+          </div>
+        </div>
+        <p id="verdict-rationale" class="verdict-rationale hidden"></p>
+        <div id="fix-first-block" class="fix-first hidden">
+          <h4 class="fix-first-title">Что исправить первым</h4>
+          <ol id="fix-first-list" class="fix-first-list"></ol>
+        </div>
+      </section>
+
+      <div class="summary-grid" aria-label="Сводные показатели отчёта">
+        <button type="button" class="metric-card" data-metric-action="requirements">
+          <span class="metric-label">Требований</span>
+          <span id="metric-req-total" class="metric-value tabular">0</span>
+          <span id="metric-req-sub" class="metric-sub"></span>
+        </button>
+        <button type="button" class="metric-card metric-card--critical" data-metric-action="critical">
+          <span class="metric-label">● Критично</span>
+          <span id="metric-critical" class="metric-value tabular">0</span>
+          <span class="metric-sub">блокируют старт</span>
+        </button>
+        <button type="button" class="metric-card metric-card--major" data-metric-action="major">
+          <span class="metric-label">▲ Существенно</span>
+          <span id="metric-major" class="metric-value tabular">0</span>
+          <span class="metric-sub">требуют уточнения</span>
+        </button>
+        <button type="button" class="metric-card metric-card--minor" data-metric-action="minor">
+          <span class="metric-label">■ Незначительно</span>
+          <span id="metric-minor" class="metric-value tabular">0</span>
+          <span class="metric-sub">оформление и стиль</span>
+        </button>
+        <button type="button" class="metric-card" data-metric-action="questions">
+          <span class="metric-label">Вопросов автору</span>
+          <span id="metric-questions" class="metric-value tabular">0</span>
+          <span id="metric-questions-sub" class="metric-sub"></span>
+        </button>
+      </div>
+
+      <div class="tabs-shell card">
+        <div class="tablist-wrap">
+          <div class="tablist" role="tablist" aria-label="Разделы отчёта">
+            <button
+              id="tab-findings"
+              class="tab-btn"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-findings"
+              data-tab="findings"
+            >
+              Нарушения <span id="tab-count-findings" class="tab-count tabular">0</span>
+            </button>
+            <button
+              id="tab-requirements"
+              class="tab-btn"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-requirements"
+              tabindex="-1"
+              data-tab="requirements"
+            >
+              Требования <span id="tab-count-requirements" class="tab-count tabular">0</span>
+            </button>
+            <button
+              id="tab-set"
+              class="tab-btn"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-set"
+              tabindex="-1"
+              data-tab="set"
+            >
+              Проверка набора <span id="tab-count-set" class="tab-count tabular">0</span>
+            </button>
+            <button
+              id="tab-questions"
+              class="tab-btn"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-questions"
+              tabindex="-1"
+              data-tab="questions"
+            >
+              Вопросы автору <span id="tab-count-questions" class="tab-count tabular">0</span>
+            </button>
+            <button
+              id="tab-markdown"
+              class="tab-btn"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-markdown"
+              tabindex="-1"
+              data-tab="markdown"
+            >
+              Отчёт Markdown
+            </button>
+          </div>
+        </div>
+
+        <div id="panel-findings" class="tab-panel" role="tabpanel" aria-labelledby="tab-findings">
+          <div class="filter-bar">
+            <div class="filter-group" role="group" aria-label="Фильтр по критичности">
+              <button type="button" class="filter-pill is-active" data-severity="all">Все <span id="flt-cnt-all" class="tabular">0</span></button>
+              <button type="button" class="filter-pill filter-pill--critical" data-severity="critical">● Критичный <span id="flt-cnt-critical" class="tabular">0</span></button>
+              <button type="button" class="filter-pill filter-pill--major" data-severity="major">▲ Существенный <span id="flt-cnt-major" class="tabular">0</span></button>
+              <button type="button" class="filter-pill filter-pill--minor" data-severity="minor">■ Незначительный <span id="flt-cnt-minor" class="tabular">0</span></button>
+            </div>
+            <div class="filter-controls">
+              <label class="sr-only" for="criterion-filter">Фильтр по критерию</label>
+              <select id="criterion-filter" class="select-input">
+                <option value="all">Все критерии</option>
+              </select>
+              <label class="sr-only" for="finding-search">Поиск по нарушениям</label>
+              <input
+                id="finding-search"
+                class="text-input"
+                type="search"
+                placeholder="Поиск по ID, цитате, разделу…"
+              >
+            </div>
+          </div>
+          <div id="findings-list" class="findings-list"></div>
+        </div>
+
+        <div id="panel-requirements" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-requirements">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">R-ID</th>
+                  <th scope="col">ID в документе</th>
+                  <th scope="col">Раздел</th>
+                  <th scope="col">Тип</th>
+                  <th scope="col">Краткий текст</th>
+                  <th scope="col">Статус</th>
+                </tr>
+              </thead>
+              <tbody id="requirements-tbody"></tbody>
+            </table>
+          </div>
+          <p id="skipped-blocks-summary" class="table-footnote"></p>
+        </div>
+
+        <div id="panel-set" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-set">
+          <div id="set-check-content" class="set-sections"></div>
+        </div>
+
+        <div id="panel-questions" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-questions">
+          <div class="panel-toolbar">
+            <p class="muted-note">Сначала отображаются блокирующие вопросы по критичным дефектам.</p>
+            <button id="copy-questions-btn" type="button" class="btn btn-secondary btn-sm">Скопировать вопросы</button>
+          </div>
+          <div id="questions-list" class="questions-list"></div>
+        </div>
+
+        <div id="panel-markdown" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-markdown">
+          <div class="panel-toolbar">
+            <p class="muted-note">Полный текст отчёта в формате Markdown.</p>
+            <div class="toolbar-actions">
+              <button id="copy-markdown-btn" type="button" class="btn btn-secondary btn-sm">Скопировать текст</button>
+              <a id="panel-download-md-btn" class="btn btn-primary btn-sm" href="#" download>Скачать .md</a>
+            </div>
+          </div>
+          <pre id="markdown-pre" class="markdown-pre"></pre>
+        </div>
+      </div>
+
+      <details class="card stages-details">
+        <summary class="stages-details-summary">Журнал этапов и паспорт прогона</summary>
+        <div id="passport-details-body" class="stages-details-body"></div>
+      </details>
+    </section>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -189,8 +189,9 @@ class Budget:
 class StageCache:
     """On-disk cache of raw model answers keyed by model, prompt and schema."""
 
-    def __init__(self, root: Path | None):
+    def __init__(self, root: Path | None, *, read: bool = True):
         self.root = root
+        self.read = read  # with read=False answers are still saved, so a fresh run can be inspected
 
     @staticmethod
     def key(model: str, system: str | None, prompt: str, schema: dict | None) -> str:
@@ -201,7 +202,7 @@ class StageCache:
         return h.hexdigest()
 
     def get(self, key: str) -> dict | None:
-        if self.root is None:
+        if self.root is None or not self.read:
             return None
         path = self.root / f"{key}.json"
         try:

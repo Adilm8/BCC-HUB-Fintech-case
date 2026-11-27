@@ -195,8 +195,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     client = client or make_client(settings)
     budget = Budget(profile.max_calls)
-    root = Path(settings.cache_dir) if settings.cache_enabled else None
-    cache = StageCache(root)
+    cache = StageCache(Path(settings.cache_dir), read=settings.cache_enabled)
     deadline = time.monotonic() + settings.run_deadline_seconds
     ctx = StageContext(client=client, settings=settings, budget=budget, cache=cache, deadline=deadline)
     index = QuoteIndex(doc)
@@ -310,7 +309,9 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         check_ok = bool(checked)
         not_checked = [x for x in reqs if x.id not in checked]
         if check_ok:
-            detail = f"батчей: {len(batches)}, проверено требований: {len(checked)} из {len(reqs)}"
+            n_check = sum(1 for c in candidates if c.source == FindingSource.LLM)
+            detail = (f"батчей: {len(batches)}, проверено требований: {len(checked)} из {len(reqs)}, "
+                      f"кандидатов: {n_check}")
             run.emit(StageKey.CHECK, run.finished_state(StageKey.CHECK), detail)
             if not_checked:
                 run.warnings.append(f"Не проверено требований: {len(not_checked)} "
@@ -378,6 +379,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             candidates, outcome = pp.apply_review(candidates, review, builder, stats)
             reviewed = True
             pp.clean_texts(candidates, builder)
+            pp.apply_guards(candidates)  # the critic may not lift capped criteria
             if outcome.missed:
                 pp.clean_texts(outcome.missed, builder)
                 pp.apply_guards(outcome.missed)
@@ -461,7 +463,9 @@ def _coverage(builder: pp.CandidateBuilder, data: LLMSetCheck, reqs: list[Requir
 def _aggregate_gaps(builder: pp.CandidateBuilder, coverage: list[CoverageRow],
                     candidates: list[pp.Candidate]) -> list[pp.Candidate]:
     """One aggregated finding for requirements without acceptance criteria, when no finding mentions them."""
-    uncovered = [c.requirement_id for c in coverage if c.status == "none"]
+    kinds = {r.id: r.kind for r in builder.reqs.values()}
+    gap_kinds = {ReqKind.FUNCTIONAL, ReqKind.NONFUNCTIONAL, ReqKind.INTEGRATION, ReqKind.DATA}
+    uncovered = [c.requirement_id for c in coverage if c.status == "none" and kinds.get(c.requirement_id) in gap_kinds]
     if not uncovered:
         return []
     mentioned = {r for c in candidates if c.set_check in (SetCheck.ACCEPTANCE_GAP, SetCheck.MISSING_SCENARIO)
@@ -470,6 +474,7 @@ def _aggregate_gaps(builder: pp.CandidateBuilder, coverage: list[CoverageRow],
     if not rest:
         return []
     evidence = [builder.requirement_evidence(r) for r in rest[:3]]
+    rest = rest[:10]
     ids = ", ".join(rest)
     return [pp.Candidate(
         criterion=Criterion.SET_VALIDATABLE, severity=Severity.MAJOR, evidence=evidence,

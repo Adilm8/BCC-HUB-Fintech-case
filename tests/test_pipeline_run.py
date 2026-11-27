@@ -269,3 +269,17 @@ def test_block_ids_are_removed_from_texts():
 
     rep = run(FakeLLM({"check": check}))
     assert all(not re.search(r"\bB\d{3}\b", f.explanation) for f in rep.findings)
+
+
+def test_critic_generic_drop_of_major_finding_downgrades_it():
+    def review(prompt, schema):
+        ids = re.findall(r"^(C\d+) \|", section(prompt, "candidates"), re.MULTILINE)
+        return {"decisions": [{"finding_id": i, "verdict": "drop", "merge_into": "", "severity": "major",
+                               "drop_reason": "generic", "counter_quote": "", "improved_question": ""} for i in ids],
+                "missed": [], "fix_first": [], "verdict_rationale": ""}
+
+    base = run(FakeLLM())
+    rep = run(FakeLLM({"review": review}))
+    base_minor = base.summary.findings_by_severity.get("minor", 0)
+    assert rep.summary.findings_total == base.summary.findings_total - base_minor
+    assert all(f.severity == "minor" for f in rep.findings)

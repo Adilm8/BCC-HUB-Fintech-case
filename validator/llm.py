@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Literal
+from typing import ClassVar, Literal
 
 from validator.config import Settings
 
@@ -204,20 +204,37 @@ class GeminiClient(LLMClient):
         self._client = genai.Client(
             api_key=settings.api_key, http_options=types.HttpOptions(timeout=int(settings.timeout_seconds * 1000))
         )
+        self._no_thinking: set[str] = set()
+
+    _THINKING: ClassVar[dict[str, str]] = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH", "xhigh": "HIGH", "max": "HIGH"}
 
     def _call(self, model, prompt, *, system, json_schema, temperature, effort, max_output_tokens, timeout):
         from google.genai import types
 
         schema = strip_schema_keys(json_schema, ("maxItems", "minItems", "$comment")) if json_schema else None
-        config = types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=0.1 if temperature is None else temperature,
-            max_output_tokens=max_output_tokens,
-            response_mime_type="application/json" if schema else None,
-            response_json_schema=schema,
-            http_options=types.HttpOptions(timeout=int(timeout * 1000)),
-        )
-        resp = self._client.models.generate_content(model=model, contents=prompt, config=config)
+        level = self._THINKING.get((effort or "").lower()) if model not in self._no_thinking else None
+
+        def config(with_thinking: bool):
+            extra = {}
+            if with_thinking and level:
+                extra["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+            return types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=0.1 if temperature is None else temperature,
+                max_output_tokens=max_output_tokens,
+                response_mime_type="application/json" if schema else None,
+                response_json_schema=schema,
+                http_options=types.HttpOptions(timeout=int(timeout * 1000)),
+                **extra,
+            )
+
+        try:
+            resp = self._client.models.generate_content(model=model, contents=prompt, config=config(True))
+        except Exception as exc:
+            if not level or classify_error(exc) != "bad_request" or "think" not in str(exc).lower():
+                raise
+            self._no_thinking.add(model)  # this model does not accept a thinking level
+            resp = self._client.models.generate_content(model=model, contents=prompt, config=config(False))
         truncated = False
         candidates = getattr(resp, "candidates", None) or []
         if candidates:
