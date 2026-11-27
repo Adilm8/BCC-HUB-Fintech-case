@@ -1218,6 +1218,14 @@ RULE_OPTIONS: dict[str, list[str]] = {
                                    "Параметры обязательны всегда: описать, что с ними делать при выключении"],
     "one_line_process": ["Описать участников, шаги и ветки отказов в отдельной схеме процесса",
                          "Схема иллюстративная: сослаться на функциональные требования как на основной источник"],
+    "nfr_unmeasurable": ["От получения запроса до передачи на отправку, p95, при расчётной пиковой нагрузке",
+                         "От события до доставки клиенту, p99, при средней нагрузке"],
+    "notification_content": ["Привести шаблон: текст, поля, маскирование (последние 4 цифры карты)",
+                             "Сообщение без персональных и платёжных данных, только ссылка в приложение"],
+    "mixed_levels": ["Перенести правило в бизнес-требования сервиса, который его выполняет",
+                     "Оставить и описать, как метод это обеспечивает (поля, проверки, ответы)"],
+    "boundary_tests_missing": ["Добавить в критерии приёмки строки на границе и на шаг за ней",
+                               "Граница проверяется другим способом: указать каким"],
 }
 RULE_OPTION_CONSEQUENCES: dict[str, list[str]] = {
     "placeholder": [
@@ -1304,6 +1312,24 @@ RULE_OPTION_CONSEQUENCES: dict[str, list[str]] = {
         "Схема процесса в {loc} дополняется ветками отказов и альтернативными исходами; пробел закрывается.",
         "В {loc} фиксируется обзорный статус схемы со ссылкой на функциональные правила; замечание снимается.",
     ],
+    "nfr_unmeasurable": [
+        ("В {loc} задаются интервал от получения запроса до передачи на отправку, p95 и пиковая нагрузка; "
+        "требование становится проверяемым."),
+        "В {loc} задаются интервал до доставки клиенту, p99 и средняя нагрузка; требование становится проверяемым.",
+    ],
+    "notification_content": [
+        "В документ добавляется шаблон сообщения для {loc} с полями и маскированием; пробел закрывается.",
+        "Сообщение для {loc} не содержит персональных и платёжных данных; вопрос о маскировании снимается.",
+    ],
+    "mixed_levels": [
+        ("Правило из {loc} переносится в бизнес-требования ответственного сервиса; спецификация метода "
+        "описывает только контракт."),
+        "В {loc} описывается, какими полями, проверками и ответами метод обеспечивает правило.",
+    ],
+    "boundary_tests_missing": [
+        "В критерии приёмки добавляются строки на границе и на шаг за ней; пробел закрывается.",
+        "В документе указывается, как проверяются границы; замечание снимается.",
+    ],
 }
 _TEST_STUB_CONSEQUENCES = [
     "В {loc} добавляются тестовые сценарии до начала разработки; пробел по тестированию закрывается.",
@@ -1312,6 +1338,7 @@ _TEST_STUB_CONSEQUENCES = [
 # who answers questions of the deterministic gap rules
 RULE_ADDRESSEE = {"units_mismatch": "analyst", "idempotency_without_key": "architect", "boundary_tests_missing": "qa",
                   "non_singular": "analyst", "undefined_term": "analyst", "integration_without_failure": "architect",
+                  "nfr_unmeasurable": "analyst", "notification_content": "analyst", "mixed_levels": "analyst",
                   "flag_with_mandatory_params": "analyst", "one_line_process": "business"}
 
 
@@ -1374,6 +1401,8 @@ def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
         return c.addressee
     text = f"{c.explanation} {c.question}"
     if c.source == FindingSource.RULE:
+        if c.rule == "notification_content" and "маскирован" in c.explanation:
+            return "security"  # personal or card data in a message: information security decides
         if c.rule in RULE_ADDRESSEE:
             return RULE_ADDRESSEE[c.rule]
         if c.rule.startswith("api_"):

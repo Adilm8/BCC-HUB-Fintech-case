@@ -15,14 +15,18 @@ import os
 # EXP_BOUNDARY_RULE       rule boundary_tests_missing (validator/rules/boundaries.py)
 # EXP_SINGULAR_RULE, EXP_ABBREV_RULE, EXP_FAILURE_RULE  rules non_singular, undefined_term and
 #                         integration_without_failure (validator/rules/extra.py)
+# EXP_NFR_RULE, EXP_NOTIFY_RULE, EXP_MIXED_RULE  rules nfr_unmeasurable, notification_content and mixed_levels
+#                         (validator/rules/nfr_notify.py): no hits on clean requirements of the evaluation set
 # EXP_GLOSSARY            terms that conditions depend on, found by code, go to the check with "is it defined?"
 # EXP_STATES              S2 also builds a state x event table for entities with statuses or flags
 TOGGLES = ("EXP_REMARKS", "EXP_COMPLETENESS_ITEMS", "EXP_DOMAIN", "EXP_BOUNDARY_RULE", "EXP_GLOSSARY",
-           "EXP_STATES", "EXP_SINGULAR_RULE", "EXP_ABBREV_RULE", "EXP_FAILURE_RULE", "EXP_NO_REVIEW")
+           "EXP_STATES", "EXP_SINGULAR_RULE", "EXP_ABBREV_RULE", "EXP_FAILURE_RULE", "EXP_NFR_RULE",
+           "EXP_NOTIFY_RULE", "EXP_MIXED_RULE", "EXP_NO_REVIEW")
 
 
 # measured gain on the evaluation set: on by default
-DEFAULT_ON = frozenset({"EXP_DOMAIN", "EXP_GLOSSARY", "EXP_BOUNDARY_RULE", "EXP_STATES", "EXP_COMPLETENESS_ITEMS"})
+DEFAULT_ON = frozenset({"EXP_DOMAIN", "EXP_GLOSSARY", "EXP_BOUNDARY_RULE", "EXP_STATES", "EXP_COMPLETENESS_ITEMS",
+                        "EXP_NFR_RULE", "EXP_NOTIFY_RULE", "EXP_MIXED_RULE"})
 
 
 def enabled(name: str) -> bool:

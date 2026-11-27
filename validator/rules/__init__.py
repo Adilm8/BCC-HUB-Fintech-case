@@ -28,6 +28,13 @@ def run_prechecks(doc: Document) -> PrecheckResult:
                         ("EXP_FAILURE_RULE", extra.check_integration_failures)):
         if toggles.enabled(flag):
             extra_findings.extend(check(doc))
+    from validator.rules import nfr_notify
+
+    for flag, check in (("EXP_NFR_RULE", nfr_notify.check_nfr_unmeasurable),
+                        ("EXP_NOTIFY_RULE", nfr_notify.check_notification_content),
+                        ("EXP_MIXED_RULE", nfr_notify.check_mixed_levels)):
+        if toggles.enabled(flag):
+            extra_findings.extend(check(doc))
     if not extra_findings:
         return base
     return PrecheckResult(
