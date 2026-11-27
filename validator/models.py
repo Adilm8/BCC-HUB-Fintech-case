@@ -386,6 +386,27 @@ class RunInfo(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class DroppedCandidate(BaseModel):
+    """A candidate finding removed after the model stages; for analysis only, not rendered."""
+
+    candidate_id: str
+    stage: Literal["review", "unconfirmed"]
+    reason: str  # document_specifies | generic | out_of_scope | merged | unconfirmed
+    merge_into: str = ""
+    counter_quote: str = ""
+    source: str
+    kind: str  # requirement or the set check
+    criterion: str
+    severity: str
+    requirement_ids: list[str] = Field(default_factory=list)
+    quote: str = ""
+    explanation: str = ""
+
+
+class ReportDebug(BaseModel):
+    critic_dropped: list[DroppedCandidate] = Field(default_factory=list)
+
+
 class Report(BaseModel):
     schema_version: str = SCHEMA_VERSION
     run: RunInfo
@@ -397,6 +418,7 @@ class Report(BaseModel):
     questions: list[Question]
     summary: Summary
     verdict: Verdict
+    debug: ReportDebug | None = None  # analysis data, not part of the rendered report
 
 
 # ---------------------------------------------------------------- exchange between modules

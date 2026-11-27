@@ -143,7 +143,7 @@ def test_cache_key_depends_on_effort_and_model():
     assert k1 != StageCache.key("m2", "s", "p", {}, effort="high")
 
 
-def test_fallback_model_answer_is_not_cached(tmp_path):
+def test_fallback_model_answer_is_cached_under_its_own_model(tmp_path):
     class Fallback(FakeLLM):
         def complete(self, *a, **kw):
             r = super().complete(*a, **kw)
@@ -152,7 +152,11 @@ def test_fallback_model_answer_is_not_cached(tmp_path):
 
     fake = Fallback({"check": {"results": []}})
     call_structured(fake, LLMCheck, "p", system="s", budget=Budget(5), cache=StageCache(tmp_path))
-    assert not list(tmp_path.glob("*.json"))
+    assert len(list(tmp_path.glob("**/*.json"))) == 1
+    # the primary model's key is still empty: the next run asks the primary model again
+    again = call_structured(FakeLLM({"check": {"results": []}}), LLMCheck, "p", system="s", budget=Budget(5),
+                            cache=StageCache(tmp_path))
+    assert not again.cached
 
 
 def test_merge_keeps_the_gist_of_a_different_finding():
@@ -327,8 +331,8 @@ def test_round7_rule_questions_get_owner_and_options():
 
 def test_round7_quote_does_not_cross_a_section_heading():
     from validator.models import RawDocument
-    from validator.pipeline._fallback_structure import parse_structure
     from validator.pipeline.quotes import QuoteIndex
+    from validator.structure import parse_structure
 
     raw = RawDocument(path="x.md", name="x.md", title="T", format="md",
                       text="# T\n\n## A\n\nКонец раздела первого\n\n## B\n\nНачало раздела второго\n")

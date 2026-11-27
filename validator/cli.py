@@ -21,10 +21,8 @@ _STATE = {
 
 
 def _render(report: Report) -> str:
-    try:
-        from validator.report.markdown import render_markdown  # type: ignore[import-not-found]
-    except ImportError:
-        from validator.pipeline._fallback_render import render_markdown
+    from validator.report.markdown import render_markdown
+
     return render_markdown(report)
 
 
@@ -83,6 +81,10 @@ def _main(argv: list[str] | None) -> int:
     parser.add_argument("--no-json", action="store_true", help="не записывать отчёт JSON")
     parser.add_argument("--no-cache", action="store_true", help="не использовать кэш этапов")
     parser.add_argument("--profile", choices=sorted(PROFILES), default=None, help="профиль вызовов модели")
+    parser.add_argument("--save-trace", type=Path, default=None, metavar="DIR",
+                        help="записать все запросы к модели и ответы прогона в папку (без ключей)")
+    parser.add_argument("--replay", type=Path, default=None, metavar="DIR",
+                        help="повторить прогон по записанной трассе: без ключа и без сети")
     parser.add_argument("--rules-only", action="store_true",
                         help="проверить только правилами, без модели (ключ не нужен; итог не определён)")
     args = parser.parse_args(argv)
@@ -93,12 +95,31 @@ def _main(argv: list[str] | None) -> int:
         print(f"Ошибка: {args.output} — это папка; укажите путь к файлу отчёта .md.", file=sys.stderr)
         return 2
 
+    if sum(bool(x) for x in (args.save_trace, args.replay, args.rules_only)) > 1:
+        print("Ошибка: --save-trace, --replay и --rules-only нельзя сочетать.", file=sys.stderr)
+        return 2
+
     load_dotenv()
     try:
-        settings = Settings.from_env(require_key=not args.rules_only)
+        offline = args.rules_only or args.replay is not None
+        settings = Settings.from_env(require_key=not offline)
         overrides = {}
-        if args.rules_only:
-            overrides["cache_enabled"] = False  # a cached model answer would turn this into a model run
+        if args.rules_only or args.replay is not None or args.save_trace is not None:
+            # a cached model answer would bypass the trace or turn a rules-only run into a model run
+            overrides["cache_enabled"] = False
+        replay = None
+        if args.replay is not None:
+            from validator.config import PROVIDERS
+            from validator.trace import ReplayClient, read_manifest, restore_prompt_env
+
+            replay = ReplayClient(args.replay)
+            m = read_manifest(args.replay)
+            restore_prompt_env(m)
+            overrides.update(model=m.get("model", settings.model), fallback_models=tuple(m.get("fallback_models", ())),
+                             profile_name=m.get("profile", settings.profile_name),
+                             max_context_chars=int(m.get("max_context_chars", settings.max_context_chars)))
+            if replay.provider in PROVIDERS:
+                overrides["provider"] = replay.provider
         if args.profile:
             overrides["profile_name"] = args.profile
         if args.no_cache:
@@ -108,7 +129,17 @@ def _main(argv: list[str] | None) -> int:
         from validator.pipeline import run_pipeline
 
         client = None
-        if args.rules_only:
+        if replay is not None:
+            client = replay
+            print(f"Повтор прогона {args.input} по трассе {args.replay}", file=sys.stderr, flush=True)
+        elif args.save_trace is not None:
+            from validator.llm import make_client
+            from validator.trace import TracingClient
+
+            client = TracingClient(make_client(settings), args.save_trace, settings)
+            print(f"Проверка {args.input} (профиль {settings.profile.name}), трасса: {args.save_trace}",
+                  file=sys.stderr, flush=True)
+        elif args.rules_only:
             from validator.llm import DisabledClient
 
             client = DisabledClient(settings)

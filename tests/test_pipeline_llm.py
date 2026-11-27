@@ -109,3 +109,22 @@ def test_gemini_thinking_level_falls_back_when_rejected(monkeypatch):
     assert r.text == '{"ok": true}' and calls[0] is not None and calls[-1] is None
     c.complete("p", effort="high")
     assert calls[-1] is None and len(calls) == 3  # the model is remembered as not accepting it
+
+
+def test_a_cached_fallback_answer_is_used_once_the_primary_is_out_of_quota(tmp_path):
+    from validator.pipeline.prompts.io import LLMCheck
+    from validator.pipeline.structured import Budget, StageCache, call_structured
+
+    ok = '{"results": []}'
+    quota = RuntimeError("429 RESOURCE_EXHAUSTED GenerateRequestsPerDay")
+    cache = StageCache(tmp_path)
+    c = Scripted(_settings(), [quota, ok])
+    r1 = call_structured(c, LLMCheck, "p1", system="s", budget=Budget(9), cache=cache)
+    assert r1.responses[-1].model == "m2" and c.models_called == ["m1", "m2"]
+    # same process, primary exhausted: the fallback's cached answer stands in, no call
+    r2 = call_structured(c, LLMCheck, "p1", system="s", budget=Budget(9), cache=cache)
+    assert r2.cached and c.models_called == ["m1", "m2"]
+    # a fresh client whose primary works asks the primary model
+    fresh = Scripted(_settings(), [ok])
+    r3 = call_structured(fresh, LLMCheck, "p1", system="s", budget=Budget(9), cache=cache)
+    assert not r3.cached and fresh.models_called == ["m1"]

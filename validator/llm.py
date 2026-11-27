@@ -14,7 +14,7 @@ from validator.config import Settings, extra_provider_module
 
 ErrorKind = Literal[
     "quota_daily", "rate_limit", "timeout", "server", "auth", "bad_request", "invalid_json", "network", "refusal",
-    "deadline", "skipped", "disabled", "other"
+    "deadline", "skipped", "disabled", "replay", "other"
 ]
 
 # only an explicit per-day quota is daily; "quota exceeded for metric" is also sent for per-minute limits
@@ -174,6 +174,16 @@ class LLMClient:
     @property
     def model(self) -> str:
         return self._settings.model
+
+    def cache_models(self, primary: str | None = None) -> list[str]:
+        """Models whose cached answers may stand in for `primary`: itself, and the fallbacks once it is out of
+        daily quota in this process (a fresh answer of the primary model is preferred while it works)."""
+        first = primary or self._settings.model
+        with self._lock:
+            out_of_quota = first in self._exhausted
+        if not out_of_quota:
+            return [first]
+        return [first, *(m for m in self._settings.fallback_models if m != first)]
 
     def _models(self, primary: str | None = None) -> list[str]:
         first = primary or self._settings.model

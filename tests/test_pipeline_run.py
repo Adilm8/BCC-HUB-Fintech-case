@@ -9,7 +9,7 @@ from validator.config import Settings
 from validator.llm import LLMError
 from validator.models import RawDocument, Report, RunStatus, StageKey, StageState
 from validator.pipeline import run_pipeline
-from validator.pipeline._fallback_render import render_markdown
+from validator.report.markdown import render_markdown
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,7 +62,7 @@ def test_happy_path_complete_report():
     assert rep.verdict.development == "no"  # fake set check returns a critical contradiction
     assert any(e.stage == StageKey.CHECK for e in events)
     Report.model_validate_json(rep.model_dump_json())
-    assert "## 8. Итог" in render_markdown(rep)
+    assert "## Итог" in render_markdown(rep)
 
 
 def test_requirements_get_doc_ids_and_numbering():

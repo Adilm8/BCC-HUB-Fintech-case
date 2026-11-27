@@ -110,7 +110,7 @@ def _common(doc: Document, reqs: list[Requirement], include_document: bool) -> l
 
 def build_s1_prompt(doc: Document, reqs: list[Requirement], inventory: list[InventoryItem], *,
                     include_document: bool = True, merged_with_s2: str | None = None, pairs: str = "",
-                    second_pass: bool = False) -> str:
+                    second_pass: bool = False, task: str | None = None) -> str:
     parts = _common(doc, list(reversed(reqs)) if second_pass else reqs, include_document)
     parts.append("<parts>\n" + "\n".join(f"- {p}" for p in doc.parts) + "\n</parts>" if doc.parts else
                  "<parts>документ из одной части</parts>")
@@ -119,7 +119,7 @@ def build_s1_prompt(doc: Document, reqs: list[Requirement], inventory: list[Inve
     if pairs:
         parts.append("<pairs>\n" + pairs + "\n</pairs>")
     parts.append(SET_EXAMPLES)
-    task = S1_TASK
+    task = task or S1_TASK
     if pairs:
         from validator.pipeline.experiments import PAIRS_INSTRUCTION
 

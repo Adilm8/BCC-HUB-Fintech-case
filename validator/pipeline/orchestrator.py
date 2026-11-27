@@ -27,6 +27,7 @@ from validator.models import (
     PrecheckResult,
     RawDocument,
     Report,
+    ReportDebug,
     ReqKind,
     Requirement,
     RunInfo,
@@ -45,14 +46,26 @@ from validator.pipeline.stages import StageContext
 from validator.pipeline.stages.check import make_batches, run_check_batch, run_dimension_pass
 from validator.pipeline.stages.extract import run_extract
 from validator.pipeline.stages.review import run_review
-from validator.pipeline.stages.setcheck import run_entities, run_merged, run_pairs, run_s1, run_s2
+from validator.pipeline.stages.setcheck import (
+    run_entities,
+    run_merged,
+    run_pairs,
+    run_s1,
+    run_s2,
+    run_scenarios,
+)
 from validator.pipeline.structured import Budget, BudgetExceeded, StageCache, StructuredResult
 from validator.pipeline.verdict import build_questions, build_summary, build_verdict
 
 LLM_STAGES = (StageKey.EXTRACT, StageKey.CHECK, StageKey.SET_CHECK, StageKey.REVIEW)
 FATAL_KINDS = {"quota_daily", "deadline", "auth", "network", "disabled"}
+ABORT_KINDS = {"auth", "replay"}  # the run stops with an error: a rejected key, or a trace that does not match
 TOPUP_LIMIT = 40
 PAIR_LENS_PROVIDERS: set[str] = set()  # providers that get a separate rule-pair call; the lens lives in S1
+# extra set calls: their loss is a warning, not a partial stage; they give no coverage rows
+OPTIONAL_SET_CALLS = {"set:s1b": "Дополнительная сверка пар правил", "set:s1r": "Второй проход сверки набора",
+                      "set:scen": "Проигрывание сценариев"}
+NO_COVERAGE_SET_CALLS = {"set:s1", "set:s1c", *OPTIONAL_SET_CALLS}
 LONG_DOC_DETAIL = "документ слишком длинный для одного вызова: нарезка правилами"
 
 REASONS = {
@@ -99,20 +112,16 @@ def agent_version() -> str:
 
 
 def _load(source: Path | RawDocument) -> RawDocument:
-    from validator.pipeline._fallback_structure import to_raw
-
     if isinstance(source, RawDocument):
         return source
     from validator.loaders import load_document
 
-    return to_raw(load_document(Path(source)), Path(source))
+    return load_document(Path(source))
 
 
 def _structure(raw: RawDocument) -> Document:
-    try:
-        from validator.structure import parse_structure  # type: ignore[import-not-found]
-    except ImportError:
-        from validator.pipeline._fallback_structure import parse_structure
+    from validator.structure import parse_structure
+
     return parse_structure(raw)
 
 
@@ -211,6 +220,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     t_start = time.monotonic()
     run = _Run(settings, on_event)
     profile = settings.profile
+    from validator.pipeline import experiments as exp
+
+    if exp.enabled("EXP_NO_REVIEW"):
+        profile = replace(profile, review=False)  # ablation: the report without the critic
 
     run.emit(StageKey.LOAD, StageState.RUNNING)
     raw = _load(source)
@@ -256,7 +269,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     def fatal_from(exc: BaseException) -> None:
         nonlocal fatal
         kind = getattr(exc, "kind", "other")
-        if kind == "auth":
+        if kind in ABORT_KINDS:
             raise exc
         if kind == "deadline" and time.monotonic() < deadline - 15:
             return  # only the time before the critic's reserve ran out: the critic still gets its slot
@@ -296,6 +309,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     builder = pp.CandidateBuilder(doc, reqs, index, stats)
     candidates: list[pp.Candidate] = builder.from_rules(pre.findings)
+    from validator.pipeline import experiments as exp
+
+    if exp.enabled("EXP_RULE_HINTS"):
+        ctx.rule_hints = exp.rule_hints_text(candidates)
     counts: dict[str, int] = {"rules": len(candidates)}
     coverage: list[CoverageRow] = []
     checked: set[str] = set()
@@ -317,6 +334,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     two_pass = exp.enabled("EXP_TWO_PASS") and not profile.merge_set_checks
     if two_pass and family(getattr(client, "provider", "")) in SEQUENTIAL_PROVIDERS:
         # the second S1 is paid for with one check batch: a sequential run stays within 8 calls
+        batch_profile = replace(batch_profile, max_batches=max(1, batch_profile.max_batches - 1))
+    scenarios = exp.enabled("EXP_SCENARIOS") and not profile.merge_set_checks
+    if scenarios and family(getattr(client, "provider", "")) in SEQUENTIAL_PROVIDERS:
+        # the scenario writer is paid for with one check batch on a sequential provider
         batch_profile = replace(batch_profile, max_batches=max(1, batch_profile.max_batches - 1))
     batches = make_batches(reqs, batch_profile)
     if dimension_pass and reqs:
@@ -379,7 +400,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                 run.account(StageKey.SET_CHECK, er)
                 entities_text = exp.entity_groups(er.data, {b.id: b.text for b in doc.blocks})
             except LLMError as exc:
-                if exc.kind == "auth":
+                if exc.kind in ABORT_KINDS:
                     raise
                 run.warnings.append(f"Сбор сущностей не выполнен: {describe_error(exc)}.")
         if profile.merge_set_checks:
@@ -389,6 +410,15 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory), optional=False)),
                          ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped, entities_text),
                                           optional=False))]
+            if exp.enabled("EXP_SPLIT_S1"):
+                # S1 as two narrower calls: behaviour rules, then interface and data contracts
+                set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, part="rules"),
+                                              optional=False)),
+                             ("set:s1c", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, part="contracts"),
+                                               optional=False)),
+                             *set_tasks[1:]]
+            if scenarios:
+                set_tasks.insert(1, ("set:scen", timed(lambda: run_scenarios(ctx, doc, reqs), optional=True)))
             if two_pass:
                 # a second, independently ordered S1: union of both for recall, the critic filters
                 set_tasks.insert(1, ("set:s1r", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, second_pass=True),
@@ -437,7 +467,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             else:
                 missing.extend(x for x in b if x.id not in seen)
         for exc in failures:
-            if getattr(exc, "kind", "") == "auth":
+            if getattr(exc, "kind", "") in ABORT_KINDS:
                 raise exc
             fatal_from(exc)
         # one top-up call for requirements the model skipped or could not reach
@@ -479,12 +509,12 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             r = results[name]
             if isinstance(r, BaseException):
                 run.account(StageKey.SET_CHECK, None, getattr(r, "responses", None))
-                if name in ("set:s1b", "set:s1r"):
-                    # the extra rule-pair call is optional: its loss is noted, the stage is not partial
-                    run.warnings.append(f"Дополнительная сверка пар правил не выполнена: {describe_error(r)}.")
+                if name in OPTIONAL_SET_CALLS:
+                    # an extra call is optional: its loss is noted, the stage is not partial
+                    run.warnings.append(f"{OPTIONAL_SET_CALLS[name]}: вызов не выполнен — {describe_error(r)}.")
                     continue
                 set_failures.append((name, r))
-                if getattr(r, "kind", "") == "auth":
+                if getattr(r, "kind", "") in ABORT_KINDS:
                     raise r
                 fatal_from(r)
                 continue
@@ -494,7 +524,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             set_cands = builder.from_set(sdata.findings)
             counts["set"] = counts.get("set", 0) + len(set_cands)
             candidates.extend(set_cands)
-            if name not in ("set:s1", "set:s1b", "set:s1r"):
+            if name not in NO_COVERAGE_SET_CALLS:
                 coverage.extend(_coverage(builder, sdata, reqs))
         set_ok = len(set_failures) < len(set_names)
         if not set_failures:
@@ -538,11 +568,12 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     else:
         run.emit(StageKey.REVIEW, StageState.RUNNING)
         try:
-            r = run_review(ctx, doc, pp.candidates_for_review(candidates))
+            cautious = exp.enabled("EXP_CAUTIOUS_CRITIC")
+            r = run_review(ctx, doc, pp.candidates_for_review(candidates), cautious=cautious)
             run.account(StageKey.REVIEW, r)
             review: LLMReview = r.data
             before = len(candidates)
-            candidates, outcome = pp.apply_review(candidates, review, builder, stats)
+            candidates, outcome = pp.apply_review(candidates, review, builder, stats, cautious=cautious)
             counts["review"] = len(outcome.missed)
             reviewed = True
             pp.clean_texts(candidates, builder)
@@ -559,7 +590,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                      f"на пересмотр: {before} из {entered} кандидатов, осталось: {len(candidates)} "
                      "(подробный баланс — в приложении)")
         except LLMError as exc:
-            if exc.kind == "auth":
+            if exc.kind in ABORT_KINDS:
                 raise
             reason = run.fail(StageKey.REVIEW, exc)
             run.warnings.append(f"Критический пересмотр не выполнен: {reason}.")
@@ -611,7 +642,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     )
     return Report(run=info, requirements=reqs, skipped_blocks=ext.skipped, findings=findings,
                   set_findings=set_findings, coverage=coverage, questions=questions, summary=summary,
-                  verdict=verdict)
+                  verdict=verdict, debug=ReportDebug(critic_dropped=stats.drop_log))
 
 
 def _status(run: _Run, review_in_profile: bool) -> RunStatus:

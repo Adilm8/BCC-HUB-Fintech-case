@@ -288,12 +288,19 @@ def call_structured(
         schema = exp.reasoning_first(schema)
     model_name = model or getattr(client, "model", "") or ""
     routed = {"model": model} if model else {}  # sent only when a stage is routed to another model
-    key = StageCache.key(model_name, system, prompt, schema, effort=effort, temperature=temperature)
-    hit = cache.get(key)
-    if hit is not None:
+    def key_for(name: str) -> str:
+        return StageCache.key(name, system, prompt, schema, effort=effort, temperature=temperature)
+
+    key = key_for(model_name)
+    cache_models = getattr(client, "cache_models", None)
+    lookup = cache_models(model or None) if cache_models is not None and model_name else [model_name]
+    for name in lookup or [model_name]:
+        hit = cache.get(key_for(name))
+        if hit is None:
+            continue
         obj, dropped = validate_lenient(model_cls, hit.get("data"))
         if obj is not None:
-            resp = LLMResponse(text="", model=hit.get("model", model_name), truncated=hit.get("truncated", False))
+            resp = LLMResponse(text="", model=hit.get("model", name), truncated=hit.get("truncated", False))
             return StructuredResult(obj, [resp], dropped, resp.truncated, False, cached=True)
 
     responses: list[LLMResponse] = []
@@ -313,9 +320,11 @@ def call_structured(
             if obj is None:
                 raise ValueError("ответ не соответствует схеме")
             result = StructuredResult(obj, responses, dropped, resp.truncated, repaired or resp.truncated)
-            # an answer from a fallback model is not stored under the primary model's key
-            if not resp.truncated and (not model_name or resp.model == model_name):
-                cache.put(key, {"data": obj.model_dump(mode="json"), "model": resp.model, "truncated": False})
+            # an answer is stored under the key of the model that gave it: a fallback model's answer never
+            # passes for the primary model's
+            if not resp.truncated:
+                own = key if not model_name or resp.model == model_name else key_for(resp.model)
+                cache.put(own, {"data": obj.model_dump(mode="json"), "model": resp.model, "truncated": False})
             return result
         except ValueError as exc:
             last_error = str(exc)

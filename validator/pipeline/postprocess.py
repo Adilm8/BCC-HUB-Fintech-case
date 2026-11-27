@@ -393,6 +393,18 @@ class Stats:
     merged: int = 0
     merged_before_review: int = 0
     dropped_unconfirmed: int = 0
+    drop_log: list = field(default_factory=list)  # DroppedCandidate rows for the report's debug section
+
+
+def log_drop(stats: Stats, c: Candidate, stage: str, reason: str, *, merge_into: str = "",
+             counter_quote: str = "") -> None:
+    from validator.models import DroppedCandidate
+
+    stats.drop_log.append(DroppedCandidate(
+        candidate_id=c.cid, stage=stage, reason=reason, merge_into=merge_into, counter_quote=counter_quote[:300],
+        source=c.source.value, kind=c.set_check.value if c.set_check else "requirement",
+        criterion=c.criterion.value, severity=c.severity.value, requirement_ids=list(c.requirement_ids),
+        quote=c.evidence[0].quote[:200] if c.evidence else "", explanation=c.explanation[:300]))
 
 
 class CandidateBuilder:
@@ -861,7 +873,9 @@ class ReviewOutcome:
 
 
 def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBuilder,
-                 stats: Stats) -> tuple[list[Candidate], ReviewOutcome]:
+                 stats: Stats, *, cautious: bool = False) -> tuple[list[Candidate], ReviewOutcome]:
+    """`cautious`: only proven errors are removed, rule findings are untouched, only exact duplicates merge,
+    and a candidate the critic did not decide on is kept."""
     by_id = {c.cid: c for c in cands}
     dropped: set[str] = set()
     for d in review.decisions:
@@ -869,6 +883,23 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
         if c is None or c.cid in dropped:
             continue
         verdict = d.verdict
+        if cautious:
+            if c.source == FindingSource.RULE:
+                c.confirmed = True
+                continue
+            if verdict == "drop" and d.drop_reason in ("generic", "out_of_scope"):
+                c.confirmed = True  # an opinion, not a proof: kept as it is
+                continue
+            if verdict == "drop" and d.drop_reason == "document_specifies":
+                m = builder.index.find(d.counter_quote) if d.counter_quote.strip() else None
+                if m is None or m.status != QuoteStatus.VERIFIED:
+                    c.confirmed = True
+                    continue
+            if verdict == "merge" or d.drop_reason == "duplicate":
+                target = by_id.get(d.merge_into.strip())
+                if target is None or not (_same_place(target, c) and target.criterion == c.criterion):
+                    c.confirmed = True  # not an exact duplicate: two findings
+                    continue
         lowers = SEVERITY_RANK[Severity(d.severity)] > SEVERITY_RANK[c.severity]
         if c.protected and (verdict != "keep" or lowers):
             c.confirmed = True  # a rule-fixed critical gap is neither dropped nor lowered by the critic
@@ -897,16 +928,19 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
             if c.is_set and not target.is_set:
                 # keep the set-level finding: fold the requirement finding into it
                 merge_into(c, target)
+                log_drop(stats, target, "review", "merged", merge_into=c.cid)
                 dropped.add(target.cid)
                 c.confirmed = True
                 stats.merged += 1
                 continue
             merge_into(target, c)
+            log_drop(stats, c, "review", "merged", merge_into=target.cid)
             dropped.add(c.cid)
             stats.merged += 1
         elif verdict == "drop":
             if d.drop_reason == "document_specifies":
                 if d.counter_quote.strip() and builder.index.find(d.counter_quote) is not None:
+                    log_drop(stats, c, "review", "document_specifies", counter_quote=d.counter_quote)
                     dropped.add(c.cid)
                     stats.dropped_by_review += 1
                 else:
@@ -923,6 +957,7 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                     c.confirmed = True
                     c.review_note = "критик счёл находку несущественной; критичность понижена до незначительной"
                     continue
+                log_drop(stats, c, "review", d.drop_reason)
                 dropped.add(c.cid)
                 stats.dropped_by_review += 1
             else:
@@ -933,6 +968,9 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
             if _OPEN_QUESTION.match(c.question) and any(_YES_NO.match(o) for o in c.options):
                 c.options = []
     kept = [c for c in cands if c.cid not in dropped]
+    if cautious:
+        for c in kept:
+            c.confirmed = True  # when in doubt, keep: no silent removal of undecided candidates
     # the critic adds only critical defects, never notes about duplicates
     missed = [m for m in builder.from_set(review.missed[:5], FindingSource.REVIEW)
               if m.severity == Severity.CRITICAL and not _DUPLICATE_NOTE.search(m.explanation)
@@ -1014,6 +1052,7 @@ def drop_unconfirmed_anchored(cands: list[Candidate], reviewed: bool, stats: Sta
     for c in cands:
         if c.needs_confirmation and not c.confirmed:
             stats.dropped_unconfirmed += 1
+            log_drop(stats, c, "unconfirmed", "unconfirmed")
             continue
         out.append(c)
     return out

@@ -29,14 +29,22 @@ class StageContext:
     deadline: float
     review_reserve: float = 0.0  # seconds kept for the critic: other stages stop earlier
     note: Callable[[str, str], None] | None = None  # (stage, note) progress sink
+    rule_hints: str = ""  # findings of the rule checks, shown to the check and set stages (EXP_RULE_HINTS)
 
     def call(self, stage: str, model_cls, prompt: str, system: str) -> StructuredResult:
+        set_stage = getattr(self.client, "set_stage", None)
+        if set_stage is not None:
+            set_stage(stage)  # a trace records which stage made the call
         sink = getattr(self.client, "set_note_sink", None)
         if sink is not None:
             sink((lambda text: self.note(stage, text)) if self.note else None)
         deadline = self.deadline if stage == "review" else self.deadline - self.review_reserve
         from validator.pipeline import experiments as exp
 
+        if self.rule_hints and stage in ("check", "set_check"):
+            from validator.pipeline.prompts.experimental import insert_rule_hints
+
+            prompt = insert_rule_hints(prompt, self.rule_hints)
         if exp.enabled("EXP_REPEAT_INSTRUCTION"):
             prompt = exp.repeat_instruction(prompt)
         if exp.enabled("EXP_SCHEMA_REASONING_FIRST"):

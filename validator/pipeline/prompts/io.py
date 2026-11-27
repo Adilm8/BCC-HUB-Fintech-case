@@ -94,6 +94,28 @@ class LLMSetCheck(BaseModel):
     coverage: list[LLMCoverage]
 
 
+class LLMReading(BaseModel):
+    requirement_id: str
+    quote: str
+    prescribes: str  # what this place requires in the scenario
+
+
+class LLMScenario(BaseModel):
+    scenario: str  # inputs and steps with concrete values
+    readings: list[LLMReading]
+    outcome: Literal["defined", "undefined", "contradictory"]
+    explanation: str
+    severity: SeverityLit
+    recommendation: str
+    clarifying_question: str
+    addressee: AddresseeLit = "analyst"
+    answer_options: list[str]
+
+
+class LLMScenarios(BaseModel):
+    scenarios: list[LLMScenario]
+
+
 class LLMDecision(BaseModel):
     finding_id: str
     verdict: Literal["keep", "drop", "merge"]

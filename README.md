@@ -37,3 +37,5 @@ python -m validator docs/requirements.md reports/report.md
 ```bash
 uv run python -m pytest -q
 ```
+
+Без uv: `pip install -r requirements-dev.txt`, затем `python -m pytest -q` и `ruff check .`.

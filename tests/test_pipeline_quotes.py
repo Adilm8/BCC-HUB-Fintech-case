@@ -1,6 +1,6 @@
 from validator.models import Document, QuoteStatus, RawDocument
-from validator.pipeline._fallback_structure import parse_structure
 from validator.pipeline.quotes import QuoteIndex, normalize, quotes_overlap
+from validator.structure import parse_structure
 
 TEXT = """# Бронирование переговорных
 

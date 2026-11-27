@@ -24,7 +24,9 @@ def enabled(name: str) -> bool:
 
 def active() -> list[str]:
     names = ["EXP_REPEAT_INSTRUCTION", "EXP_SCHEMA_REASONING_FIRST", "EXP_ENTITY_PASS", "EXP_DIMENSION_PASS",
-             "EXP_PAIR_ENUM", "EXP_TWO_PASS"]
+             "EXP_PAIR_ENUM", "EXP_TWO_PASS", "EXP_SCENARIOS",
+             "EXP_SPLIT_S1", "EXP_RULE_HINTS",
+             "EXP_CAUTIOUS_CRITIC", "EXP_NO_REVIEW"]
     return [n for n in names if enabled(n)]
 
 
@@ -82,6 +84,52 @@ contradiction с двумя цитатами и сценарием; соглас
 
 SECOND_PASS_NOTE = """Это второй, независимый проход: иди по документу от последней части к первой и начинай с \
 пар правил, которые ограничивают одно событие (лимиты, сбросы, флаги, коды ответов)."""
+
+
+# ---------------------------------------------------------------- rule hints
+
+
+def rule_hints_text(cands, limit: int = 30) -> str:
+    """Verified rule findings as one short line each: rule, place, gist."""
+    from validator.models import FindingSource, QuoteStatus
+    from validator.pipeline.prompts.render import safe
+
+    lines = []
+    for c in cands:
+        if c.source != FindingSource.RULE or not c.evidence:
+            continue
+        if any(e.quote_status != QuoteStatus.VERIFIED for e in c.evidence):
+            continue
+        place = ", ".join(c.requirement_ids) or c.evidence[0].section or "документ"
+        gist = c.explanation.strip().split(". ")[0][:140]
+        lines.append(f"- {c.rule or 'правило'} | {safe(place)} | {safe(gist)}")
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- scenario writer
+
+
+def scenarios_to_set(data, limit: int = 8):
+    """Replayed scenarios with a disagreement or a gap become set findings: contradictions first."""
+    from validator.pipeline.prompts.io import LLMEvidence, LLMSetCheck, LLMSetFinding
+
+    bad = [s for s in data.scenarios if s.outcome != "defined" and s.explanation.strip()]
+    bad.sort(key=lambda s: s.outcome != "contradictory")
+    findings = []
+    for s in bad[:limit]:
+        evidence = [LLMEvidence(requirement_id=r.requirement_id, quote=r.quote) for r in s.readings if r.quote.strip()]
+        replay = "; ".join(f"{r.requirement_id}: {r.prescribes.strip()}" for r in s.readings if r.prescribes.strip())
+        contradiction = s.outcome == "contradictory" and len(evidence) >= 2
+        findings.append(LLMSetFinding(
+            evidence=evidence[:4], scenario=s.scenario.strip() + (f" → {replay}" if replay else ""),
+            explanation=s.explanation, set_check="contradiction" if contradiction else "missing_scenario",
+            criterion="set_consistent" if contradiction else "set_complete",
+            severity=s.severity if contradiction or s.severity != "critical" else "major",
+            recommendation=s.recommendation, clarifying_question=s.clarifying_question, addressee=s.addressee,
+            answer_options=s.answer_options))
+    return LLMSetCheck(ledger=[], findings=findings, coverage=[])
 
 
 # ---------------------------------------------------------------- repeat the instruction

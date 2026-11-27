@@ -28,10 +28,11 @@ duplicate (дубль — укажи в merge_into ID оставляемой н�
 6. verdict_rationale — 2–3 фразы: можно ли начинать разработку и тестирование и почему."""
 
 
-def build_review_prompt(doc: Document, candidates_text: str, *, include_document: bool = True) -> str:
+def build_review_prompt(doc: Document, candidates_text: str, *, include_document: bool = True,
+                        task: str | None = None) -> str:
     parts = []
     if include_document:
         parts.append(render_document(doc))
     parts.append("<candidates>\n" + candidates_text + "\n</candidates>")
-    parts.append(TASK)
+    parts.append(task or TASK)
     return "\n\n".join(parts)
