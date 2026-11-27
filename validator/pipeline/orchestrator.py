@@ -316,7 +316,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             done = sorted(durations)
             return max(45.0, 1.2 * done[len(done) // 2]) if done else 90.0
 
-        def timed(fn: Callable[[], StructuredResult], *, optional: bool) -> Callable[[], StructuredResult]:
+        stage_seconds: dict[StageKey, float] = {StageKey.CHECK: 0.0, StageKey.SET_CHECK: 0.0}
+
+        def timed(fn: Callable[[], StructuredResult], *, optional: bool,
+                  key: StageKey = StageKey.SET_CHECK) -> Callable[[], StructuredResult]:
             def task() -> StructuredResult:
                 left = deadline - review_reserve - time.monotonic()
                 need = typical_call()
@@ -324,12 +327,16 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                     raise LLMError(f"пропущено: осталось {max(left, 0):.0f} с, обычный вызов занимает около "
                                    f"{need:.0f} с", "skipped")
                 t0 = time.monotonic()
-                res = fn()
+                try:
+                    res = fn()
+                finally:
+                    stage_seconds[key] += time.monotonic() - t0
                 durations.append(time.monotonic() - t0)
                 return res
             return task
 
-        check_tasks = [(f"check:{i}", timed(lambda b=b: run_check_batch(ctx, doc, b, reqs, pre.hints), optional=True))
+        check_tasks = [(f"check:{i}", timed(lambda b=b: run_check_batch(ctx, doc, b, reqs, pre.hints), optional=True,
+                                            key=StageKey.CHECK))
                        for i, b in enumerate(batches)]
         if profile.merge_set_checks:
             set_tasks = [("set:merged", timed(lambda: run_merged(ctx, doc, reqs, pre.inventory, ext.skipped),
@@ -447,6 +454,9 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             run.emit(StageKey.SET_CHECK, StageState.FAILED if not set_ok else StageState.DONE,
                      f"не выполнено ({lens}): {reason}")
             run.warnings.append(f"Проверка набора выполнена не полностью ({lens}): {reason}.")
+        # each stage shows the time of its own calls, not the wall time of the whole wave
+        for key, secs in stage_seconds.items():
+            run.stages[key].seconds = round(secs, 2)
 
     derived: list[pp.Candidate] = []
     if not check_ok and pre.hints:

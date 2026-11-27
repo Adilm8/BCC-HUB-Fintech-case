@@ -13,13 +13,16 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from validator.config import PROFILES, PROVIDERS, Settings
 from validator.llm import LLMClient
+from validator.models import Report
 from validator.pipeline import agent_version
+from validator.report.markdown import render_markdown
 from validator.web.jobs import (
     ConfigurationError,
     JobBusyError,
@@ -36,6 +39,7 @@ _READ_CHUNK_BYTES = 64 * 1024
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_DOCUMENT_PATH = REPO_ROOT / "docs" / "requirements.md"
+SAMPLE_REPORT_PATH = REPO_ROOT / "reports" / "report.json"
 
 _UNSAFE_FILENAME_RE = re.compile(r"[^\w.-]+", re.UNICODE)
 
@@ -94,6 +98,32 @@ def _read_upload_limited(upload: UploadFile, max_bytes: int) -> bytes:
             raise HTTPException(
                 status_code=413,
                 detail="Размер файла превышает ограничение 10 МБ.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _read_request_body_limited(request: Request, max_bytes: int) -> bytes:
+    """Read an HTTP request body in chunks, aborting once size exceeds max_bytes."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Размер отчёта превышает ограничение 10 МБ.",
+                )
+        except ValueError:
+            pass
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="Размер отчёта превышает ограничение 10 МБ.",
             )
         chunks.append(chunk)
     return b"".join(chunks)
@@ -161,6 +191,7 @@ def create_app(
 
     @app.get("/api/health", response_model=HealthDTO)
     def health() -> HealthDTO:
+        sample_report_available = SAMPLE_REPORT_PATH.is_file()
         if settings is not None:
             return HealthDTO(
                 status="ok",
@@ -168,6 +199,7 @@ def create_app(
                 provider=settings.provider,
                 model=settings.model,
                 key_configured=bool(settings.api_key and settings.api_key.strip()),
+                sample_report_available=sample_report_available,
             )
         provider, model, key_configured = _health_from_env()
         if not key_configured and client is not None:
@@ -180,6 +212,83 @@ def create_app(
             provider=provider,
             model=model,
             key_configured=key_configured,
+            sample_report_available=sample_report_available,
+        )
+
+    @app.get("/api/sample-report")
+    def get_sample_report(
+        download: bool = Query(default=False),
+    ) -> Response:
+        if not SAMPLE_REPORT_PATH.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="Встроенный пример отчёта не найден.",
+            )
+        try:
+            if SAMPLE_REPORT_PATH.stat().st_size > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Встроенный пример отчёта превышает ограничение 10 МБ.",
+                )
+            raw_text = SAMPLE_REPORT_PATH.read_text(encoding="utf-8-sig")
+            report = Report.model_validate_json(raw_text)
+        except HTTPException:
+            raise
+        except (OSError, UnicodeDecodeError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Встроенный пример отчёта повреждён или имеет неверный формат.",
+            ) from exc
+
+        headers: dict[str, str] = {}
+        if download:
+            headers["Content-Disposition"] = _content_disposition(
+                report.run.document_name,
+                ".json",
+            )
+        return Response(
+            content=report.model_dump_json(indent=2),
+            media_type="application/json; charset=utf-8",
+            headers=headers,
+        )
+
+    @app.post("/api/render-md")
+    async def render_report_markdown(
+        request: Request,
+        download: bool = Query(default=False),
+    ) -> Response:
+        raw_body = await _read_request_body_limited(request, MAX_UPLOAD_BYTES)
+        if not raw_body or not raw_body.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Файл отчёта пуст.",
+            )
+        try:
+            text = raw_body.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Некорректная кодировка файла отчёта (ожидается UTF-8).",
+            ) from exc
+        try:
+            report = Report.model_validate_json(text)
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Файл не соответствует формату отчёта валидатора (Report JSON).",
+            ) from exc
+
+        markdown = render_markdown(report)
+        headers: dict[str, str] = {}
+        if download:
+            headers["Content-Disposition"] = _content_disposition(
+                report.run.document_name,
+                ".md",
+            )
+        return Response(
+            content=markdown,
+            media_type="text/markdown; charset=utf-8",
+            headers=headers,
         )
 
     @app.post("/api/runs", response_model=RunCreatedDTO, status_code=202)

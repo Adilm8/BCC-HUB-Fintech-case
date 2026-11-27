@@ -908,11 +908,11 @@ RULE_OPTIONS: dict[str, list[str]] = {
     "api_body_content_type_unused": ["Убрать Content-Type для запроса без тела", "Описать тело запроса"],
     "api_get_with_body": ["Убрать тело из запроса GET", "Сменить метод на POST или PUT"],
 }
-GENERIC_OPTIONS = ["Уточнить формулировку в документе до начала разработки",
-                   "Оставить как есть и зафиксировать допущение команды"]
-
-
 def rule_options(c: Candidate) -> list[str]:
+    where = " ".join([c.explanation, *(e.section for e in c.evidence)])
+    if c.rule in ("placeholder", "empty_section") and re.search(r"тестир", where, re.IGNORECASE):
+        return ["Тестовые сценарии будут описаны в документе до начала разработки",
+                "Тестирование ведётся по отдельному документу QA: дать ссылку на него"]
     if c.rule in RULE_OPTIONS:
         return list(RULE_OPTIONS[c.rule])
     if c.set_check == SetCheck.EMPTY_SECTION:
@@ -921,6 +921,9 @@ def rule_options(c: Candidate) -> list[str]:
 
 
 def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
+    kinds_here = {reqs[r].kind for r in c.requirement_ids if r in reqs}
+    if kinds_here and kinds_here <= {ReqKind.UI}:
+        return "business"  # screen texts and behaviour are decided by the product owner or UX
     if c.addressee in ADDRESSEES:
         return c.addressee
     text = f"{c.explanation} {c.question}"
@@ -990,8 +993,6 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
         c.options = distinct_options(c.options)
         if not c.options and c.source == FindingSource.RULE:
             c.options = rule_options(c)
-        if not c.options and c.severity == Severity.CRITICAL:
-            c.options = list(GENERIC_OPTIONS)  # a blocking question always offers a way to answer
 
     def req_pos(c: Candidate) -> int:
         return min((order.get(r, 10**6) for r in c.requirement_ids), default=10**6)

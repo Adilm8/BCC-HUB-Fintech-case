@@ -17,6 +17,7 @@ class HealthDTO(BaseModel):
     provider: str
     model: str
     key_configured: bool
+    sample_report_available: bool = False
 
 
 class RunCreatedDTO(BaseModel):

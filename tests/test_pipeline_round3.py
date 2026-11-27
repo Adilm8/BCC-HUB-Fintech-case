@@ -334,3 +334,28 @@ def test_round7_quote_does_not_cross_a_section_heading():
                       text="# T\n\n## A\n\nКонец раздела первого\n\n## B\n\nНачало раздела второго\n")
     idx = QuoteIndex(parse_structure(raw))
     assert idx.find("Конец раздела первого B Начало раздела второго") is None
+
+
+def test_round9_plural_and_single_card():
+    from validator.report.markdown import _plural
+
+    assert _plural(41, "вопрос", "вопроса", "вопросов") == "41 вопрос"
+    assert _plural(3, "вопрос", "вопроса", "вопросов") == "3 вопроса"
+    assert _plural(12, "вопрос", "вопроса", "вопросов") == "12 вопросов"
+    rep = run(FakeLLM())
+    md = render_markdown(rep)
+    for f in rep.findings:
+        assert md.count(f"] {f.id} —") <= 1
+
+
+def test_round9_questions_text_and_options():
+    ev = _ev("заполняются тестировщиками", "B9", "Требования к тестированию › Тестирование требований")
+    c = pp.Candidate("set_complete", Severity.CRITICAL, [ev], "В разделе тестирования стоит заглушка.", "r",
+                     "Кто заполнит раздел?", [], [], "rule", set_check="empty_section", rule="placeholder")
+    _, sets = pp.finalize([c], [])
+    assert sets[0].answer_options and all("Значение будет указано" not in o for o in sets[0].answer_options)
+    open_q = pp.Candidate("complete", Severity.CRITICAL, [_ev("Порог задаёт клиент", "B1")],
+                          "Не определено, что делать, когда значение уже за границей.", "r", "Что происходит?", [],
+                          ["R-001"], "llm")
+    findings, _ = pp.finalize([open_q], [])
+    assert findings[0].answer_options == []  # no bureaucratic placeholder options

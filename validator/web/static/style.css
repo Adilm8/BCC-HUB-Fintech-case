@@ -448,6 +448,30 @@ body {
   color: var(--text-muted);
 }
 
+.upload-secondary {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.upload-secondary-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.upload-secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* Progress Section */
 .progress-card {
   padding: 22px;
@@ -1480,6 +1504,14 @@ body {
   }
 
   .result-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .upload-secondary-actions {
+    width: 100%;
+  }
+
+  .upload-secondary-actions .btn {
     flex: 1 1 auto;
   }
 }

@@ -71,11 +71,14 @@ def build_questions(findings: list[Finding], set_findings: list[SetFinding]) -> 
     items = sorted(_all(findings, set_findings), key=_question_priority)
     out: list[Question] = []
     classes: dict[str, DefectClass] = {}
+    places: dict[str, set[str]] = {}  # question id -> blocks quoted by its findings
     for f in items:
         text = f.clarifying_question.strip()
         if not text:
             continue
-        q = next((x for x in out if _same_topic(x, f, classes[x.id])), None)
+        blocks = {b for e in f.evidence for b in e.block_ids}
+        q = next((x for x in out if _same_topic(x, f, classes[x.id]) or _same_place_question(x, f, places[x.id],
+                                                                                            blocks)), None)
         if q is not None:
             q.finding_ids.append(f.id)
             q.requirement_ids.extend(r for r in f.requirement_ids if r not in q.requirement_ids)
@@ -88,8 +91,23 @@ def build_questions(findings: list[Finding], set_findings: list[SetFinding]) -> 
                      requirement_ids=list(f.requirement_ids), section=f.section,
                      blocking=f.severity == Severity.CRITICAL, addressee=f.addressee)
         classes[q.id] = f.defect_class
+        places[q.id] = set(blocks)
         out.append(q)
+    for q in out:
+        for f in items:
+            if f.id in q.finding_ids:
+                places[q.id] |= {b for e in f.evidence for b in e.block_ids}
     return out
+
+
+def _same_place_question(q: Question, f: AnyFinding, q_blocks: set[str], f_blocks: set[str]) -> bool:
+    """Questions about findings that quote the same block and share a topic are one question."""
+    if not (q_blocks & f_blocks):
+        return False
+    from validator.pipeline.postprocess import stem_set
+
+    wa, wb = stem_set(q.text), stem_set(f.clarifying_question)
+    return bool(wa and wb) and len(wa & wb) / len(wa | wb) >= 0.4
 
 
 def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],
@@ -129,6 +147,17 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
         dropped_unverified_quotes=dropped_unverified,
         dropped_by_review=dropped_by_review,
     )
+
+
+def _fix_rank(f: AnyFinding) -> int:
+    from validator.models import Criterion, FindingSource, SetCheck
+
+    if f.defect_class == DefectClass.CONTRADICTORY:
+        return 0
+    template = f.source == FindingSource.RULE and (
+        getattr(f, "set_check", None) in (SetCheck.EMPTY_SECTION, SetCheck.MISSING_REQUIREMENT, SetCheck.TRACEABILITY)
+        or f.criterion in (Criterion.CONFORMING, Criterion.TRACEABLE, Criterion.RANKED))
+    return 2 if template else 1
 
 
 def _short_title(f: AnyFinding, limit: int = 400) -> str:
@@ -184,7 +213,9 @@ def build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings
     if len(order) < 7:
         order += [f for f in sorted(major, key=lambda f: (CLASS_ORDER.index(f.defect_class), f.id))
                   if f not in order]
-    order.sort(key=lambda f: SEVERITY_RANK[f.severity])  # stable: keeps the critic's order within a level
-    fix_first = [FixItem(finding_id=f.id, title=_short_title(f)) for f in order[:7]]
+    # stable: keeps the critic's order within a level; behaviour conflicts before formatting and templates
+    order.sort(key=lambda f: (SEVERITY_RANK[f.severity], _fix_rank(f)))
+    limit = max(7, len(critical))
+    fix_first = [FixItem(finding_id=f.id, title=_short_title(f)) for f in order[:limit]]
     return Verdict(development=development, testing=testing, headline=headline, rationale=rationale,
                    fix_first=fix_first)

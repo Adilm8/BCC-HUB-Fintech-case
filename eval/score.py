@@ -3,21 +3,38 @@
     python -m eval.score <report.json> <gold.json> [--out PATH] [--no-write]
 
 Без сети и без модели: читает сохранённый JSON отчёта (`validator.models.Report`) и эталон
-(`eval/gold/*.json`, формат описан в docs/architecture.md §9.1 и ниже).
+(`eval/gold/*.json`, формат описан ниже).
 
 Формат эталона:
 
     {"document": "...", "defects": [
         {"id": "G01", "severity": "critical", "criterion": "set_consistent", "description": "...",
-         "match": {"all_of": [["альтернатива 1", "альтернатива 2"], ["альтернатива"]]},
+         "match": {"where": [["фрагмент 1", "фрагмент 2"]],
+                   "what": [["противореч", "несоответств"], ["альтернатива"]]},
          "blocks_hint": ["фрагмент документа, где лежит дефект"]}],
      "clean": [{"id": "C01", "anchor": "фрагмент корректного требования"}]}
 
-Сопоставление. «Стог» находки: цитаты всех её доказательств, заголовки требований, на которые она
-ссылается, и объяснение. Всё нормализуется (регистр, «ё», тире, пробелы, обратные кавычки). Дефект
-найден, если существует находка, в стоге которой для каждой группы `all_of` встречается хотя бы одна
-альтернатива. Альтернатива вида `re:<регулярное выражение>` ищется регулярным выражением (нужно для
-слов-«якорей» вроде `\\bget\\b` или `\\b200\\b`, которые как подстрока сработали бы на чём угодно).
+Сопоставление. Группа это список альтернатив (должна встретиться хотя бы одна), условие в целом это
+«все группы». Условие дефекта состоит из двух частей:
+
+* `where` (где): слова места, фрагменты цитат, номера требований. Ищутся в полном «стоге» находки:
+  цитаты всех её доказательств, заголовки требований, на которые она ссылается, объяснение и вопрос.
+* `what` (что): слова самого дефекта (противоречие, метода нет, не определено...). Ищутся только в
+  собственном тексте находки: заголовок (если есть), объяснение и уточняющий вопрос. Цитаты и заголовки
+  требований сюда не входят, поэтому находка на другую тему, которая просто цитирует тот же абзац,
+  дефект не засчитывает.
+
+Для обратной совместимости `match.all_of` читается как `where` (поиск в полном «стоге»).
+
+Всё нормализуется (регистр, «ё», тире, пробелы, обратные кавычки). Альтернатива вида `re:<регулярное
+выражение>` ищется регулярным выражением (нужно для якорей вроде `\\bget\\b` или `\\b200\\b`, которые как
+подстрока сработали бы на чём угодно).
+
+Кредит. Для каждой пары (находка, дефект) считается сила совпадения: число найденных альтернатив
+(в `what` с весом 2) плюс бонус, если в цитате находки есть `blocks_hint`. Одна находка засчитывается не
+более чем двум дефектам (лучшим по силе), а сводная находка, ссылающаяся больше чем на 8 требований,
+только одному. Прочие совпавшие дефекты от этой находки кредита не получают (`uncredited_finding_ids`).
+Precision (нижняя граница) считает находку совпавшей, если она подходит хотя бы одному дефекту.
 """
 
 from __future__ import annotations
@@ -33,9 +50,15 @@ from typing import Any
 
 SEVERITIES = ("critical", "major", "minor")
 _RANK = {"critical": 0, "major": 1, "minor": 2}
-_DASHES = re.compile("[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]")
+_DASHES = re.compile("[‐‑‒–—―−]")
 _STRIP = re.compile(r"[`*]")
 _SPACES = re.compile(r"\s+")
+
+MAX_PER_FINDING = 2  # столько дефектов эталона может засчитать одна находка
+MAX_PER_AGGREGATE = 1  # столько, если находка ссылается на слишком много требований
+AGGREGATE_REQUIREMENTS = 8  # «слишком много» значит больше этого числа
+WHAT_WEIGHT = 2
+HINT_BONUS = 3
 
 
 def normalize(text: str) -> str:
@@ -67,17 +90,33 @@ def _compile_alt(raw: str) -> Alt:
     return Alt(raw, None, normalize(raw))
 
 
+Groups = tuple[tuple[Alt, ...], ...]
+
+
+def _holds(groups: Groups, haystack: str) -> bool:
+    return all(any(a.found_in(haystack) for a in group) for group in groups)
+
+
+def _hits(groups: Groups, haystack: str) -> int:
+    return sum(1 for group in groups for a in group if a.found_in(haystack))
+
+
 @dataclass(frozen=True)
 class GoldItem:
     id: str
     severity: str
     criterion: str
     description: str
-    groups: tuple[tuple[Alt, ...], ...]
+    where: Groups
+    what: Groups
     hints: tuple[str, ...]
 
-    def matches(self, haystack: str) -> bool:
-        return all(any(a.found_in(haystack) for a in group) for group in self.groups)
+    def matches(self, view: FindingView) -> bool:
+        return _holds(self.where, view.where_hay) and _holds(self.what, view.what_hay)
+
+    def strength(self, view: FindingView) -> int:
+        bonus = HINT_BONUS if any(normalize(h) in q for h in self.hints for q in view.quotes) else 0
+        return _hits(self.where, view.where_hay) + WHAT_WEIGHT * _hits(self.what, view.what_hay) + bonus
 
 
 @dataclass(frozen=True)
@@ -85,6 +124,16 @@ class Gold:
     document: str
     items: tuple[GoldItem, ...]
     clean: tuple[tuple[str, str], ...]  # (id, нормализованный фрагмент)
+
+
+def _parse_groups(gid: str, name: str, raw: Any) -> Groups:
+    if raw is None:
+        return ()
+    ok = isinstance(raw, list) and all(
+        isinstance(g, list) and g and all(isinstance(a, str) and a for a in g) for g in raw)
+    if not ok:
+        raise ValueError(f"эталон {gid}: match.{name} должен быть списком непустых списков строк")
+    return tuple(tuple(_compile_alt(a) for a in g) for g in raw)
 
 
 def parse_gold(data: Any) -> Gold:
@@ -102,12 +151,12 @@ def parse_gold(data: Any) -> Gold:
         severity = raw.get("severity")
         if severity not in SEVERITIES:
             raise ValueError(f"эталон {gid}: severity должна быть одной из {SEVERITIES}, а не {severity!r}")
-        groups_raw = (raw.get("match") or {}).get("all_of")
-        if not groups_raw or not all(isinstance(g, list) and g and all(isinstance(a, str) and a for a in g)
-                                     for g in groups_raw):
-            raise ValueError(f"эталон {gid}: match.all_of должен быть непустым списком непустых списков строк")
-        groups = tuple(tuple(_compile_alt(a) for a in g) for g in groups_raw)
-        items.append(GoldItem(gid, severity, raw.get("criterion", ""), raw.get("description", ""), groups,
+        match = raw.get("match") or {}
+        where = _parse_groups(gid, "where", match.get("where")) + _parse_groups(gid, "all_of", match.get("all_of"))
+        what = _parse_groups(gid, "what", match.get("what"))
+        if not where and not what:
+            raise ValueError(f"эталон {gid}: нужен match.where и/или match.what (или устаревший match.all_of)")
+        items.append(GoldItem(gid, severity, raw.get("criterion", ""), raw.get("description", ""), where, what,
                               tuple(raw.get("blocks_hint") or ())))
     clean: list[tuple[str, str]] = []
     for i, c in enumerate(data.get("clean") or [], 1):
@@ -132,7 +181,13 @@ class FindingView:
     criterion: str
     quotes: tuple[str, ...]  # нормализованные
     quote_preview: str
-    haystack: str
+    where_hay: str  # цитаты, заголовки требований, объяснение, вопрос
+    what_hay: str  # собственный текст находки: заголовок, объяснение, вопрос (без цитат)
+    n_requirements: int
+
+    @property
+    def capacity(self) -> int:
+        return MAX_PER_AGGREGATE if self.n_requirements > AGGREGATE_REQUIREMENTS else MAX_PER_FINDING
 
 
 def finding_views(report: dict) -> list[FindingView]:
@@ -140,13 +195,39 @@ def finding_views(report: dict) -> list[FindingView]:
     views: list[FindingView] = []
     for f in list(report.get("findings", [])) + list(report.get("set_findings", [])):
         quotes = [e.get("quote", "") for e in f.get("evidence", [])]
-        parts = quotes + [titles.get(r, "") for r in f.get("requirement_ids", [])] + [f.get("explanation", "")]
+        own = [f.get("title") or "", f.get("explanation") or "", f.get("clarifying_question") or ""]
+        req_ids = f.get("requirement_ids", [])
+        parts = quotes + [titles.get(r, "") for r in req_ids] + own
         views.append(FindingView(
             id=f["id"], severity=f.get("severity", "minor"), criterion=f.get("criterion", ""),
             quotes=tuple(normalize(q) for q in quotes), quote_preview=(quotes[0] if quotes else "")[:100],
-            haystack=normalize("\n".join(parts)),
+            where_hay=normalize("\n".join(parts)), what_hay=normalize("\n".join(own)),
+            n_requirements=len(req_ids),
         ))
     return views
+
+
+def assign_credit(views: list[FindingView], items: tuple[GoldItem, ...]
+                  ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Кому из дефектов какие находки засчитать: (credited, candidates), оба по id дефекта.
+
+    Кандидат: находка, удовлетворяющая условию дефекта. Кредит получают самые сильные пары, но не
+    больше `capacity` дефектов на находку."""
+    pairs: list[tuple[int, str, int, int]] = []  # (-сила, id находки, номер дефекта, номер находки)
+    candidates: dict[str, list[str]] = {i.id: [] for i in items}
+    for ii, item in enumerate(items):
+        for vi, v in enumerate(views):
+            if item.matches(v):
+                pairs.append((-item.strength(v), v.id, ii, vi))
+                candidates[item.id].append(v.id)
+    pairs.sort()
+    used = [0] * len(views)
+    credited: dict[str, list[str]] = {i.id: [] for i in items}
+    for _, _, ii, vi in pairs:
+        if used[vi] < views[vi].capacity:
+            used[vi] += 1
+            credited[items[ii].id].append(views[vi].id)
+    return credited, candidates
 
 
 # ---------------------------------------------------------------- scoring
@@ -163,11 +244,12 @@ def score(report: dict, gold: Gold) -> dict[str, Any]:
     if not views:
         warnings.append("в отчёте нет находок")
 
+    credited, candidates = assign_credit(views, gold.items)
+    by_id = {v.id: v for v in views}
+    matched_findings = {fid for ids in candidates.values() for fid in ids}
     rows: list[dict[str, Any]] = []
-    matched_findings: set[str] = set()
     for item in gold.items:
-        hits = [v for v in views if item.matches(v.haystack)]
-        matched_findings.update(v.id for v in hits)
+        hits = [by_id[fid] for fid in credited[item.id]]
         hints = [normalize(h) for h in item.hints]
         located = None
         if hints and hits:
@@ -177,7 +259,8 @@ def score(report: dict, gold: Gold) -> dict[str, Any]:
             severity_ok = min(_RANK.get(v.severity, 2) for v in hits) <= _RANK[item.severity]
         rows.append({"id": item.id, "severity": item.severity, "criterion": item.criterion,
                      "description": item.description, "matched": bool(hits),
-                     "finding_ids": [v.id for v in hits], "located": located, "severity_ok": severity_ok})
+                     "finding_ids": [v.id for v in hits], "located": located, "severity_ok": severity_ok,
+                     "uncredited_finding_ids": [f for f in candidates[item.id] if f not in credited[item.id]]})
 
     def recall(sev: str | None) -> dict[str, Any]:
         sel = [r for r in rows if sev is None or r["severity"] == sev]

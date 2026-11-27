@@ -115,6 +115,8 @@
     isSubmitting: false,
     report: null,
     markdown: "",
+    jsonBlobUrl: null,
+    mdBlobUrl: null,
     allFindings: [],
     activeTab: "findings",
     severityFilter: "all",
@@ -205,8 +207,30 @@
   function setControlsDisabled(disabled) {
     $("select-file-btn").disabled = disabled;
     $("sample-btn").disabled = disabled;
+    $("open-report-btn").disabled = disabled;
+    $("sample-report-btn").disabled = disabled;
     $("profile-select").disabled = disabled;
     $("file-input").disabled = disabled;
+    $("report-file-input").disabled = disabled;
+  }
+
+  function revokeBlobUrls() {
+    if (state.jsonBlobUrl) {
+      URL.revokeObjectURL(state.jsonBlobUrl);
+      state.jsonBlobUrl = null;
+    }
+    if (state.mdBlobUrl) {
+      URL.revokeObjectURL(state.mdBlobUrl);
+      state.mdBlobUrl = null;
+    }
+  }
+
+  function buildDownloadFilename(documentName, suffix) {
+    const base = String(documentName || "").replace(/\\/g, "/").split("/").pop() || "";
+    const dot = base.lastIndexOf(".");
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const cleaned = stem.replace(/[^\p{L}\p{N}._-]+/gu, "_").replace(/^[._]+|[._]+$/g, "") || "report";
+    return `report_${cleaned}${suffix}`;
   }
 
   function stopPolling() {
@@ -236,6 +260,7 @@
   async function fetchHealth() {
     const badge = $("health-badge");
     const warning = $("config-warning");
+    const sampleReportBtn = $("sample-report-btn");
     try {
       const res = await fetch("/api/health", { cache: "no-store" });
       if (!res.ok) {
@@ -251,9 +276,11 @@
         badge.textContent = `Ключ не настроен · v${data.version}`;
         warning.classList.remove("hidden");
       }
+      sampleReportBtn.classList.toggle("hidden", !Boolean(data.sample_report_available));
     } catch (_err) {
       badge.className = "status-pill status-pill--warn";
       badge.textContent = "Нет связи с сервером";
+      sampleReportBtn.classList.add("hidden");
     }
   }
 
@@ -290,8 +317,53 @@
     return null;
   }
 
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function validateReportFile(file) {
+    if (!file) {
+      return "Файл отчёта не выбран.";
+    }
+    const name = file.name || "";
+    const dot = name.lastIndexOf(".");
+    const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
+    if (ext !== ".json") {
+      return "Выберите файл отчёта в формате .json.";
+    }
+    if (file.size === 0) {
+      return "Выбранный файл пуст.";
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return "Размер файла превышает ограничение 10 МБ.";
+    }
+    return null;
+  }
+
+  function validateReportObject(data) {
+    if (!isPlainObject(data)) {
+      return "Файл не содержит JSON-объект отчёта.";
+    }
+    if (!isPlainObject(data.run)) {
+      return "В файле отсутствует обязательный раздел «run». Выберите отчёт валидатора.";
+    }
+    if (!isPlainObject(data.verdict) || !isPlainObject(data.summary)) {
+      return "В файле отсутствуют обязательные разделы «verdict» или «summary».";
+    }
+    if (
+      !Array.isArray(data.requirements) ||
+      !Array.isArray(data.findings) ||
+      !Array.isArray(data.set_findings) ||
+      !Array.isArray(data.questions)
+    ) {
+      return "Некорректная структура отчёта: ожидаются списки requirements, findings, set_findings и questions.";
+    }
+    return null;
+  }
+
   function resetToUpload() {
     stopPolling();
+    revokeBlobUrls();
     hideError();
     state.runId = null;
     state.report = null;
@@ -303,6 +375,7 @@
     state.searchQuery = "";
     $("finding-search").value = "";
     $("file-input").value = "";
+    $("report-file-input").value = "";
     $("selected-file-label").textContent = "";
     $("upload-section").classList.remove("hidden");
     $("progress-section").classList.add("hidden");
@@ -384,8 +457,112 @@
     }
   }
 
+  async function openReportJsonText(rawJsonText) {
+    const normalizedText = String(rawJsonText || "").replace(/^\uFEFF/, "");
+    let report;
+    try {
+      report = JSON.parse(normalizedText);
+    } catch (_err) {
+      showError("Не удалось разобрать JSON-файл. Проверьте, что выбран корректный файл отчёта.");
+      return false;
+    }
+
+    const schemaErr = validateReportObject(report);
+    if (schemaErr) {
+      showError(schemaErr);
+      return false;
+    }
+
+    const mdRes = await fetch("/api/render-md", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: normalizedText,
+    });
+    if (!mdRes.ok) {
+      const msg = await extractErrorMessage(
+        mdRes,
+        `Не удалось сформировать Markdown-отчёт (HTTP ${mdRes.status}).`,
+      );
+      showError(msg);
+      return false;
+    }
+    const markdown = await mdRes.text();
+    showLoadedReport(null, report, markdown, rawJsonText);
+    return true;
+  }
+
+  async function openReportFile(file) {
+    if (state.isSubmitting) {
+      return;
+    }
+    hideError();
+    const validationErr = validateReportFile(file);
+    if (validationErr) {
+      $("report-file-input").value = "";
+      showError(validationErr);
+      return;
+    }
+
+    state.isSubmitting = true;
+    setControlsDisabled(true);
+    $("selected-file-label").textContent = `Открытие отчёта: ${file.name}`;
+
+    try {
+      const rawText = await file.text();
+      const ok = await openReportJsonText(rawText);
+      if (!ok) {
+        $("selected-file-label").textContent = "";
+        setControlsDisabled(false);
+      }
+    } catch (_err) {
+      showError("Ошибка при чтении файла отчёта или обращении к серверу.");
+      $("selected-file-label").textContent = "";
+      setControlsDisabled(false);
+    } finally {
+      $("report-file-input").value = "";
+      state.isSubmitting = false;
+    }
+  }
+
+  async function openSampleReport() {
+    if (state.isSubmitting) {
+      return;
+    }
+    hideError();
+    state.isSubmitting = true;
+    setControlsDisabled(true);
+    $("selected-file-label").textContent = "Загрузка примера отчёта…";
+
+    try {
+      const res = await fetch("/api/sample-report", { cache: "no-store" });
+      if (!res.ok) {
+        const msg = await extractErrorMessage(
+          res,
+          `Не удалось загрузить пример отчёта (HTTP ${res.status}).`,
+        );
+        showError(msg);
+        $("selected-file-label").textContent = "";
+        setControlsDisabled(false);
+        return;
+      }
+      const rawText = await res.text();
+      const ok = await openReportJsonText(rawText);
+      if (!ok) {
+        $("selected-file-label").textContent = "";
+        setControlsDisabled(false);
+      }
+    } catch (_err) {
+      showError("Ошибка соединения с сервером при загрузке примера отчёта.");
+      $("selected-file-label").textContent = "";
+      setControlsDisabled(false);
+    } finally {
+      state.isSubmitting = false;
+    }
+  }
+
   function beginTrackingRun(runId, documentName) {
     stopPolling();
+    revokeBlobUrls();
     state.runId = runId;
     state.report = null;
     state.markdown = "";
@@ -492,6 +669,26 @@
     }
   }
 
+  function showLoadedReport(runId, report, markdown, rawJsonText) {
+    stopPolling();
+    state.runId = runId;
+    state.report = report;
+    state.markdown = markdown;
+    state.allFindings = buildCombinedFindings(report);
+    state.severityFilter = "all";
+    state.criterionFilter = "all";
+    state.searchQuery = "";
+    state.expandedReqIds.clear();
+    $("finding-search").value = "";
+
+    renderResult(runId, report, markdown, rawJsonText);
+    $("upload-section").classList.add("hidden");
+    $("progress-section").classList.add("hidden");
+    $("result-section").classList.remove("hidden");
+    $("new-check-btn").classList.remove("hidden");
+    setControlsDisabled(false);
+  }
+
   async function loadFinalReport(runId) {
     try {
       const [jsonRes, mdRes] = await Promise.all([
@@ -508,20 +705,7 @@
       const report = await jsonRes.json();
       const markdown = mdRes.ok ? await mdRes.text() : "";
 
-      state.report = report;
-      state.markdown = markdown;
-      state.allFindings = buildCombinedFindings(report);
-      state.severityFilter = "all";
-      state.criterionFilter = "all";
-      state.searchQuery = "";
-      state.expandedReqIds.clear();
-      $("finding-search").value = "";
-
-      renderResult(runId, report, markdown);
-      $("progress-section").classList.add("hidden");
-      $("result-section").classList.remove("hidden");
-      $("new-check-btn").classList.remove("hidden");
-      setControlsDisabled(false);
+      showLoadedReport(runId, report, markdown, null);
     } catch (_err) {
       showError("Ошибка при получении сформированного отчёта.");
       setControlsDisabled(false);
@@ -542,9 +726,9 @@
     });
   }
 
-  function renderResult(runId, report, markdown) {
+  function renderResult(runId, report, markdown, rawJsonText) {
     renderPartialBanner(report);
-    renderHeaderAndLinks(runId, report);
+    renderHeaderAndLinks(runId, report, markdown, rawJsonText);
     renderVerdict(report.verdict);
     renderSummaryCards(report);
     populateCriterionFilter(state.allFindings);
@@ -579,7 +763,7 @@
     banner.classList.remove("hidden");
   }
 
-  function renderHeaderAndLinks(runId, report) {
+  function renderHeaderAndLinks(runId, report, markdown, rawJsonText) {
     const run = report.run || {};
     $("result-doc-title").textContent = run.document_title || run.document_name || "Отчёт о проверке";
 
@@ -605,11 +789,35 @@
       meta.appendChild(el("span", null, text));
     }
 
-    const mdUrl = `/api/runs/${encodeURIComponent(runId)}/report.md?download=1`;
-    const jsonUrl = `/api/runs/${encodeURIComponent(runId)}/report.json?download=1`;
-    $("download-md-btn").setAttribute("href", mdUrl);
-    $("panel-download-md-btn").setAttribute("href", mdUrl);
-    $("download-json-btn").setAttribute("href", jsonUrl);
+    revokeBlobUrls();
+    const mdBtn = $("download-md-btn");
+    const panelMdBtn = $("panel-download-md-btn");
+    const jsonBtn = $("download-json-btn");
+
+    if (runId) {
+      const mdUrl = `/api/runs/${encodeURIComponent(runId)}/report.md?download=1`;
+      const jsonUrl = `/api/runs/${encodeURIComponent(runId)}/report.json?download=1`;
+      mdBtn.setAttribute("href", mdUrl);
+      mdBtn.setAttribute("download", "");
+      panelMdBtn.setAttribute("href", mdUrl);
+      panelMdBtn.setAttribute("download", "");
+      jsonBtn.setAttribute("href", jsonUrl);
+      jsonBtn.setAttribute("download", "");
+    } else {
+      const docName = run.document_name || run.document_title || "report";
+      const mdName = buildDownloadFilename(docName, ".md");
+      const jsonName = buildDownloadFilename(docName, ".json");
+      const jsonContent = typeof rawJsonText === "string" ? rawJsonText : JSON.stringify(report, null, 2);
+      state.mdBlobUrl = URL.createObjectURL(new Blob([markdown || ""], { type: "text/markdown; charset=utf-8" }));
+      state.jsonBlobUrl = URL.createObjectURL(new Blob([jsonContent], { type: "application/json; charset=utf-8" }));
+
+      mdBtn.setAttribute("href", state.mdBlobUrl);
+      mdBtn.setAttribute("download", mdName);
+      panelMdBtn.setAttribute("href", state.mdBlobUrl);
+      panelMdBtn.setAttribute("download", mdName);
+      jsonBtn.setAttribute("href", state.jsonBlobUrl);
+      jsonBtn.setAttribute("download", jsonName);
+    }
   }
 
   function renderVerdict(verdict) {
@@ -1431,6 +1639,7 @@
   function bindEvents() {
     const dropZone = $("drop-zone");
     const fileInput = $("file-input");
+    const reportFileInput = $("report-file-input");
 
     $("select-file-btn").addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -1440,6 +1649,14 @@
     $("sample-btn").addEventListener("click", (ev) => {
       ev.stopPropagation();
       submitSample();
+    });
+
+    $("open-report-btn").addEventListener("click", () => {
+      reportFileInput.click();
+    });
+
+    $("sample-report-btn").addEventListener("click", () => {
+      openSampleReport();
     });
 
     dropZone.addEventListener("click", (ev) => {
@@ -1473,13 +1690,24 @@
       dropZone.classList.remove("is-dragover");
       const files = ev.dataTransfer && ev.dataTransfer.files;
       if (files && files.length > 0) {
-        submitFile(files[0]);
+        const dropped = files[0];
+        if ((dropped.name || "").toLowerCase().endsWith(".json")) {
+          openReportFile(dropped);
+        } else {
+          submitFile(dropped);
+        }
       }
     });
 
     fileInput.addEventListener("change", () => {
       if (fileInput.files && fileInput.files.length > 0) {
         submitFile(fileInput.files[0]);
+      }
+    });
+
+    reportFileInput.addEventListener("change", () => {
+      if (reportFileInput.files && reportFileInput.files.length > 0) {
+        openReportFile(reportFileInput.files[0]);
       }
     });
 

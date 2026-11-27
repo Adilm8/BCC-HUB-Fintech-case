@@ -19,17 +19,29 @@ TINY_GOLD = {
     "document": "requirements.md",
     "defects": [
         {"id": "T1", "severity": "critical", "criterion": "set_consistent", "description": "чтение порога",
-         "match": {"all_of": [["чтение порога"], ["сохранени"]]}, "blocks_hint": ["Сохранение порога"]},
+         "match": {"where": [["чтение порога"], ["сохранени"]], "what": [["операции чтения"], ["re:\\bнет\\b"]]},
+         "blocks_hint": ["Сохранение порога"]},
         {"id": "T2", "severity": "major", "criterion": "complete", "description": "порог по умолчанию",
-         "match": {"all_of": [["по умолчанию"], ["порог"]]}},
+         "match": {"where": [["по умолчанию"]], "what": [["по умолчанию"], ["порог"], ["не задано"]]}},
         {"id": "T3", "severity": "major", "criterion": "set_complete", "description": "пустой раздел тестов",
-         "match": {"all_of": [["заполняются тестировщиками"], ["заглушк"]]}},
+         "match": {"where": [["заполняются тестировщиками"]], "what": [["заглушк"]]}},
         {"id": "T4", "severity": "critical", "criterion": "set_consistent", "description": "200 против 400",
-         "match": {"all_of": [["re:\\b200\\b"], ["re:\\b400\\b"]]}},
+         "match": {"where": [["re:\\b200\\b"]], "what": [["re:\\b200\\b"], ["re:\\b400\\b"]]}},
         {"id": "T5", "severity": "minor", "criterion": "ranked", "description": "нет приоритетов",
-         "match": {"all_of": [["приоритет"], ["требовани"]]}},
+         "match": {"where": [["требовани"]], "what": [["приоритет"]]}},
     ],
     "clean": [{"id": "C1", "anchor": "в течение минуты после получения события"}],
+}
+
+# the old format: every group is searched in the whole haystack (quotes included)
+LEGACY_GOLD = {
+    "document": "requirements.md",
+    "defects": [
+        {"id": "T1", "severity": "critical", "match": {"all_of": [["чтение порога"], ["сохранени"]]}},
+        {"id": "T2", "severity": "major", "match": {"all_of": [["по умолчанию"], ["порог"]]}},
+        {"id": "T3", "severity": "major", "match": {"all_of": [["заполняются тестировщиками"], ["заглушк"]]}},
+        {"id": "T4", "severity": "critical", "match": {"all_of": [["re:\\b200\\b"], ["re:\\b400\\b"]]}},
+    ],
 }
 
 
@@ -43,7 +55,23 @@ def report_of(*findings: dict) -> dict:
 
 
 def one_group_gold(*groups: list[str]) -> object:
+    """Legacy format: all groups are searched in the whole haystack."""
     return parse_gold({"defects": [{"id": "X", "severity": "major", "match": {"all_of": list(groups)}}]})
+
+
+def gold_of(*items: dict) -> object:
+    """Items are {"id", "where", "what", optional "hint", "severity"}."""
+    return parse_gold({"defects": [
+        {"id": i["id"], "severity": i.get("severity", "major"),
+         "match": {"where": i.get("where", []), "what": i.get("what", [])},
+         "blocks_hint": i.get("hint", [])} for i in items]})
+
+
+def finding_with(fid: str, quote: str, explanation: str, requirement_ids: list[str] | None = None) -> dict:
+    f = finding(quote, explanation)
+    f["id"] = fid
+    f["requirement_ids"] = requirement_ids or []
+    return f
 
 
 @pytest.fixture(scope="module")
@@ -86,6 +114,105 @@ def test_requirement_title_is_part_of_haystack(report):
     assert score(report, gold)["recall"]["found"] == 1
 
 
+def test_requirement_title_is_part_of_where_but_not_of_what(report):
+    # "передача push" is only in the title of R-003 that D-001 refers to
+    assert score(report, gold_of({"id": "X", "where": [["передача push"]]}))["recall"]["found"] == 1
+    assert score(report, gold_of({"id": "X", "what": [["передача push"]]}))["recall"]["found"] == 0
+
+
+# ---------------------------------------------------------------- where / what split
+
+
+def test_what_is_not_searched_in_quotes():
+    gold = gold_of({"id": "X", "where": [["порог"]], "what": [["противореч"]]})
+    # the quote has the defect word, the finding's own text has not
+    off_topic = finding("Противоречие: порог", "Не задан формат даты.")
+    assert score(report_of(off_topic), gold)["recall"]["found"] == 0
+    on_topic = finding("порог", "Здесь противоречие между двумя пунктами.")
+    assert score(report_of(on_topic), gold)["recall"]["found"] == 1
+
+
+def test_where_may_match_the_quote():
+    gold = gold_of({"id": "X", "where": [["заполняются тестировщиками"]], "what": [["заглушк"]]})
+    assert score(report_of(finding("заполняются тестировщиками", "Там заглушка.")), gold)["recall"]["found"] == 1
+    assert score(report_of(finding("другой абзац", "Там заглушка.")), gold)["recall"]["found"] == 0
+
+
+def test_what_uses_title_explanation_and_question_only():
+    gold = gold_of({"id": "X", "what": [["ключ дедупликации"]]})
+    f = finding("ключ дедупликации", "")
+    f["recommendation"] = "Указать ключ дедупликации"
+    assert score(report_of(f), gold)["recall"]["found"] == 0
+    f = finding("q", "")
+    f["clarifying_question"] = "Какой ключ дедупликации?"
+    assert score(report_of(f), gold)["recall"]["found"] == 1
+    f = finding("q", "")
+    f["title"] = "Нет ключ дедупликации"
+    assert score(report_of(f), gold)["recall"]["found"] == 1
+
+
+def test_off_topic_finding_quoting_the_same_text_is_not_credited():
+    """The scenario from the review: a finding on another topic quotes the gold paragraph."""
+    gold = gold_of(
+        {"id": "G15", "where": [["повторная доставка"]], "what": [["ключ", "окно"], ["идемпотент", "дедуплик"]]})
+    coverage = finding_with("S-016", "Повторная доставка одного события процессинга",
+                            "Для требований нет ни одного критерия приёмки.")
+    real = finding_with("D-010", "Повторная доставка одного события процессинга",
+                        "Не указан ключ идемпотентности и окно дедупликации.")
+    assert score(report_of(coverage), gold)["recall"]["found"] == 0
+    res = score(report_of(coverage, real), gold)
+    assert by_id(res)["G15"]["finding_ids"] == ["D-010"]
+    assert [u["id"] for u in res["unmatched_findings"]] == ["S-016"]
+
+
+# ---------------------------------------------------------------- crediting limits
+
+
+def _three_items() -> object:
+    return gold_of(
+        {"id": "A", "what": [["альфа"]]},
+        {"id": "B", "what": [["альфа"], ["бета"]]},
+        {"id": "C", "what": [["альфа"], ["бета"], ["гамма"]]},
+    )
+
+
+def test_a_finding_is_credited_to_at_most_two_items_the_best_ones():
+    res = score(report_of(finding_with("D-1", "q", "альфа бета гамма")), _three_items())
+    rows = by_id(res)
+    assert [i for i, r in rows.items() if r["matched"]] == ["B", "C"]  # A is the weakest match
+    assert rows["A"]["uncredited_finding_ids"] == ["D-1"]
+    assert res["recall"]["found"] == 2
+    # the finding is still a true positive for precision
+    assert res["precision_lower_bound"] == {"matched": 1, "total": 1, "value": 1.0}
+
+
+def test_hint_in_the_quote_makes_a_match_stronger():
+    gold = gold_of({"id": "A", "what": [["альфа"]], "hint": ["особый абзац"]},
+                   {"id": "B", "what": [["альфа"]]}, {"id": "C", "what": [["альфа"]]})
+    rows = by_id(score(report_of(finding_with("D-1", "Особый абзац", "альфа")), gold))
+    assert rows["A"]["matched"] is True
+    assert sum(1 for r in rows.values() if r["matched"]) == 2
+
+
+def test_a_finding_that_references_many_requirements_is_credited_to_one_item():
+    reqs8 = [f"R-{i:03d}" for i in range(8)]
+    res8 = score(report_of(finding_with("S-1", "q", "альфа бета", reqs8)), _three_items())
+    assert sum(1 for r in res8["items"] if r["matched"]) == 2
+    res9 = score(report_of(finding_with("S-1", "q", "альфа бета", [*reqs8, "R-999"])), _three_items())
+    assert [r["id"] for r in res9["items"] if r["matched"]] == ["B"]
+
+
+def test_cap_is_per_finding_not_per_item():
+    rep = report_of(finding_with("D-1", "q", "альфа"), finding_with("D-2", "q", "альфа"))
+    rows = by_id(score(rep, gold_of({"id": "A", "what": [["альфа"]]})))
+    assert rows["A"]["finding_ids"] == ["D-1", "D-2"]
+
+
+def test_legacy_all_of_still_searches_quotes(report):
+    result = score(report, parse_gold(LEGACY_GOLD))
+    assert [r["id"] for r in result["items"] if r["matched"]] == ["T1", "T2", "T3"]
+
+
 # ---------------------------------------------------------------- metrics on the sample report
 
 
@@ -94,6 +221,8 @@ def test_metrics_on_sample_report(report):
     items = by_id(result)
     assert [i for i, r in items.items() if r["matched"]] == ["T1", "T2", "T3"]
     assert items["T1"]["finding_ids"] == ["S-001"]
+    assert items["T2"]["finding_ids"] == ["D-002"]
+    assert items["T3"]["finding_ids"] == ["S-002"]
     assert result["recall"] == {"found": 3, "total": 5, "value": 0.6}
     assert result["recall_by_severity"]["critical"]["found"] == 1
     assert result["recall_by_severity"]["critical"]["total"] == 2
@@ -159,6 +288,10 @@ def test_markdown_summary_lists_missed_and_found(report):
     {"defects": [{"id": "A", "severity": "major", "match": {"all_of": [[]]}}]},
     {"defects": [{"id": "A", "severity": "major", "match": {"all_of": [["x"]]}},
                  {"id": "A", "severity": "major", "match": {"all_of": [["y"]]}}]},
+    {"defects": [{"id": "A", "severity": "major", "match": {}}]},
+    {"defects": [{"id": "A", "severity": "major", "match": {"where": [], "what": []}}]},
+    {"defects": [{"id": "A", "severity": "major", "match": {"what": [[]]}}]},
+    {"defects": [{"id": "A", "severity": "major", "match": {"where": [["x"]], "what": ["y"]}}]},
     {"nothing": []},
 ])
 def test_invalid_gold_is_rejected(bad):
@@ -237,7 +370,8 @@ def test_gold_file_is_consistent_with_its_document(path):
     assert gold.items
     assert any(i.severity == "critical" for i in gold.items)
     for item in gold.items:
-        assert len(item.groups) >= 2, f"{item.id}: use at least two groups"
+        assert item.where, f"{item.id}: where (location) is required"
+        assert item.what, f"{item.id}: what (the defect concept) is required"
         for hint in item.hints:
             assert normalize(hint) in doc_text, f"{path.name} {item.id}: hint not in document"
     for cid, anchor in gold.clean:
@@ -255,6 +389,18 @@ def test_gold_is_not_trivially_matched_by_bare_quotes(path):
         f["id"] = f"D{i}"
         findings.append(f)
     assert score(report_of(*findings), gold)["recall"]["value"] <= 0.3
+
+
+@pytest.mark.parametrize("path", GOLD_FILES, ids=lambda p: p.name)
+def test_gold_is_not_matched_by_an_off_topic_finding_quoting_the_defect_text(path):
+    """A finding that quotes the defective paragraph but talks about nothing in particular earns no credit."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    findings = []
+    for i, d in enumerate(data["defects"]):
+        f = finding(d["blocks_hint"][0], "Формулировка корректна, замечаний к оформлению нет.")
+        f["id"] = f"O{i}"
+        findings.append(f)
+    assert score(report_of(*findings), parse_gold(data))["recall"]["found"] == 0
 
 
 @pytest.mark.parametrize("path", GOLD_FILES, ids=lambda p: p.name)

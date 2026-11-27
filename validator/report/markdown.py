@@ -73,6 +73,20 @@ def _set_refs(report: Report) -> dict[str, list[str]]:
     return refs
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Russian numeral agreement: 1 вопрос, 3 вопроса, 5 вопросов, 21 вопрос."""
+    tail = n % 100
+    if 11 <= tail <= 14:
+        word = many
+    elif n % 10 == 1:
+        word = one
+    elif 2 <= n % 10 <= 4:
+        word = few
+    else:
+        word = many
+    return f"{n} {word}"
+
+
 def _count(n: int) -> str:
     """'1 требования', '3 требований' after the preposition «у»; plain genitive forms."""
     word = "требования" if n % 10 == 1 and n % 100 != 11 else "требований"
@@ -387,14 +401,15 @@ def _render_per_requirement(report: Report) -> list[str]:
     findings_by_req: dict[str, list[Finding]] = defaultdict(list)
     orphan_findings: list[Finding] = []
 
+    also_in: dict[str, list[str]] = defaultdict(list)  # requirement -> findings printed under another one
     for finding in report.findings:
-        matched = False
-        for req_id in finding.requirement_ids:
-            if req_id in req_ids_known:
-                findings_by_req[req_id].append(finding)
-                matched = True
-        if not matched:
+        known = [r for r in finding.requirement_ids if r in req_ids_known]
+        if not known:
             orphan_findings.append(finding)
+            continue
+        findings_by_req[known[0]].append(finding)  # the card is printed once, under its first requirement
+        for other in known[1:]:
+            also_in[other].append(finding.id)
 
     set_refs = _set_refs(report)
     clean: list[Requirement] = []
@@ -403,7 +418,7 @@ def _render_per_requirement(report: Report) -> list[str]:
             findings_by_req.get(req.id, []),
             key=lambda f: (SEVERITY_RANK[f.severity], f.id),
         )
-        if not req_findings and req.check_status != "not_checked":
+        if not req_findings and req.check_status != "not_checked" and not also_in.get(req.id):
             clean.append(req)
             continue
 
@@ -416,6 +431,11 @@ def _render_per_requirement(report: Report) -> list[str]:
         )
         if set_refs.get(req.id):
             lines.append(f"- **Затронуто в наборе:** {', '.join(set_refs[req.id])}")
+        if also_in.get(req.id):
+            lines.append(f"- **Касается и этого требования:** {', '.join(also_in[req.id])} (карточка выше)")
+        if not req_findings:
+            lines.append("")
+            continue
 
         if req.check_status == "not_checked" and not req_findings:
             lines.append("")
@@ -739,7 +759,7 @@ def _render_questions(report: Report) -> list[str]:
     if in_cards > len(report.questions):
         lines.append(
             f"Здесь собраны {len(report.questions)} главных вопросов: блокирующие первыми, близкие по теме "
-            f"объединены. Всего в карточках нарушений {in_cards} уточняющих вопросов."
+            f"объединены. Всего в карточках нарушений {_plural(in_cards, 'уточняющий вопрос', 'уточняющих вопроса', 'уточняющих вопросов')}."
         )
         lines.append("")
 

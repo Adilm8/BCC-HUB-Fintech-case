@@ -13,8 +13,12 @@ from tests.fakes import FakeLLM, default_extract
 from validator.config import PROVIDERS, Settings
 from validator.llm import LLMError
 from validator.models import Report, StageKey
+from validator.report.markdown import render_markdown
+from validator.web import app as web_app
 from validator.web.app import MAX_UPLOAD_BYTES, create_app
 from validator.web.schemas import RunStatusDTO
+
+SAMPLE_REPORT_FIXTURE = Path(__file__).parent / "fixtures" / "sample_report.json"
 
 SAMPLE_MD = """# Бронирование переговорных
 
@@ -66,6 +70,8 @@ def test_index_and_static_assets():
         assert "Проверка требований" in index.text
         assert "ISO/IEC/IEEE 29148" in index.text
         assert "IEEE 830" in index.text
+        assert "Открыть готовый отчёт (.json)" in index.text
+        assert "Посмотреть пример отчёта" in index.text
         assert 'type="password"' not in index.text
 
         js = client.get("/static/app.js")
@@ -305,3 +311,114 @@ def test_auth_error_fails_job_cleanly():
         assert final_data["status"] == "failed"
         assert final_data["error"]
         assert "secret" not in final_data["error"]
+
+
+def test_render_md_valid_report_without_api_key(monkeypatch):
+    for key_var, _model_var, _default_model, _fallback_var in PROVIDERS.values():
+        monkeypatch.delenv(key_var, raising=False)
+
+    raw_bytes = SAMPLE_REPORT_FIXTURE.read_bytes()
+    expected_report = Report.model_validate_json(raw_bytes.decode("utf-8"))
+    expected_md = render_markdown(expected_report)
+
+    app = create_app(settings=None, client=None)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/render-md",
+            content=raw_bytes,
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert "text/markdown" in resp.headers["content-type"]
+        assert resp.text == expected_md
+
+        # UTF-8 BOM is accepted cleanly.
+        bom_resp = client.post(
+            "/api/render-md",
+            content=b"\xef\xbb\xbf" + raw_bytes,
+            headers={"Content-Type": "application/json"},
+        )
+        assert bom_resp.status_code == 200
+        assert bom_resp.text == expected_md
+
+        # Download flag sets attachment Content-Disposition with .md extension.
+        dl_resp = client.post(
+            "/api/render-md?download=1",
+            content=raw_bytes,
+            headers={"Content-Type": "application/json"},
+        )
+        assert dl_resp.status_code == 200
+        assert "attachment;" in dl_resp.headers.get("content-disposition", "")
+        assert ".md" in dl_resp.headers["content-disposition"]
+
+
+def test_render_md_validation_errors_400_and_413():
+    app = create_app(settings=None, client=None)
+    with TestClient(app) as client:
+        assert client.post("/api/render-md", content=b"").status_code == 400
+        assert client.post("/api/render-md", content=b"   \n\t  ").status_code == 400
+        assert client.post("/api/render-md", content=b"\xff\xfe\x00").status_code == 400
+        assert client.post("/api/render-md", content=b"{not valid json").status_code == 400
+        assert client.post("/api/render-md", json=[]).status_code == 400
+        assert client.post("/api/render-md", json={"schema_version": "1.0"}).status_code == 400
+
+        # Exceeding 10 MB limit returns 413 (both with Content-Length and chunked stream).
+        oversized = b" " * (MAX_UPLOAD_BYTES + 1)
+        assert client.post("/api/render-md", content=oversized).status_code == 413
+
+        def chunked_oversized():
+            chunk = b" " * (1024 * 1024)
+            for _ in range(10):
+                yield chunk
+            yield b" "
+
+        assert client.post("/api/render-md", content=chunked_oversized()).status_code == 413
+
+
+def test_sample_report_endpoint_and_health_flag(monkeypatch, tmp_path):
+    for key_var, _model_var, _default_model, _fallback_var in PROVIDERS.values():
+        monkeypatch.delenv(key_var, raising=False)
+
+    app = create_app(settings=None, client=None)
+    with TestClient(app) as client:
+        # Missing bundled sample report -> health reports False and endpoint returns 404.
+        monkeypatch.setattr(web_app, "SAMPLE_REPORT_PATH", tmp_path / "missing_report.json")
+        health_missing = client.get("/api/health")
+        assert health_missing.status_code == 200
+        assert health_missing.json()["sample_report_available"] is False
+        assert client.get("/api/sample-report").status_code == 404
+
+        # Present bundled sample report -> health reports True and endpoint returns valid Report JSON.
+        monkeypatch.setattr(web_app, "SAMPLE_REPORT_PATH", SAMPLE_REPORT_FIXTURE)
+        health_present = client.get("/api/health")
+        assert health_present.status_code == 200
+        assert health_present.json()["sample_report_available"] is True
+
+        sample_resp = client.get("/api/sample-report")
+        assert sample_resp.status_code == 200
+        assert "application/json" in sample_resp.headers["content-type"]
+        report = Report.model_validate_json(sample_resp.text)
+        assert report.run.document_title == "Уведомление о расходах по карте"
+        assert len(report.requirements) == 5
+        assert len(report.findings) == 2
+        assert len(report.set_findings) == 2
+
+        sample_dl = client.get("/api/sample-report?download=1")
+        assert sample_dl.status_code == 200
+        assert "attachment;" in sample_dl.headers.get("content-disposition", "")
+        assert ".json" in sample_dl.headers["content-disposition"]
+
+        # Round-trip sample report into POST /api/render-md without any API key.
+        md_resp = client.post(
+            "/api/render-md",
+            content=sample_resp.content,
+            headers={"Content-Type": "application/json"},
+        )
+        assert md_resp.status_code == 200
+        assert md_resp.text == render_markdown(report)
+
+        # Corrupted sample file returns 500 cleanly.
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{corrupt", encoding="utf-8")
+        monkeypatch.setattr(web_app, "SAMPLE_REPORT_PATH", corrupt)
+        assert client.get("/api/sample-report").status_code == 500

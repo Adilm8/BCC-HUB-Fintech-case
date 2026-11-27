@@ -28,7 +28,7 @@
   <main id="main-content" class="container main-content">
     <div id="config-warning" class="alert alert--warning hidden" role="status">
       <strong class="alert-title">Ключ доступа на сервере не настроен.</strong>
-      <span class="alert-body">Для запуска анализа настройте переменные окружения сервера и перезапустите приложение.</span>
+      <span class="alert-body">Для запуска нового анализа настройте переменные окружения сервера и перезапустите приложение. Просмотр готовых отчётов (.json) доступен без ключа.</span>
     </div>
 
     <div id="error-banner" class="alert alert--critical hidden" role="alert">
@@ -76,6 +76,23 @@
           </select>
         </label>
         <span id="selected-file-label" class="muted-note" aria-live="polite"></span>
+      </div>
+
+      <div class="upload-secondary">
+        <div class="upload-secondary-text">
+          <span class="field-label">Просмотр без вызова модели</span>
+          <span class="muted-note">Откройте готовый отчёт JSON, созданный командой python -m validator.</span>
+        </div>
+        <div class="upload-secondary-actions">
+          <input
+            id="report-file-input"
+            class="sr-only"
+            type="file"
+            accept=".json,application/json"
+          >
+          <button id="open-report-btn" type="button" class="btn btn-secondary">Открыть готовый отчёт (.json)</button>
+          <button id="sample-report-btn" type="button" class="btn btn-secondary hidden">Посмотреть пример отчёта</button>
+        </div>
       </div>
     </section>
 
