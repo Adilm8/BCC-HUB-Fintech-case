@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import threading
@@ -41,15 +42,15 @@ from validator.pipeline import postprocess as pp
 from validator.pipeline.prompts.io import LLMCheck, LLMExtraction, LLMReview, LLMSetCheck
 from validator.pipeline.quotes import QuoteIndex
 from validator.pipeline.stages import StageContext
-from validator.pipeline.stages.check import make_batches, run_check_batch
+from validator.pipeline.stages.check import make_batches, run_check_batch, run_dimension_pass
 from validator.pipeline.stages.extract import run_extract
 from validator.pipeline.stages.review import run_review
-from validator.pipeline.stages.setcheck import run_merged, run_pairs, run_s1, run_s2
+from validator.pipeline.stages.setcheck import run_entities, run_merged, run_pairs, run_s1, run_s2
 from validator.pipeline.structured import Budget, BudgetExceeded, StageCache, StructuredResult
 from validator.pipeline.verdict import build_questions, build_summary, build_verdict
 
 LLM_STAGES = (StageKey.EXTRACT, StageKey.CHECK, StageKey.SET_CHECK, StageKey.REVIEW)
-FATAL_KINDS = {"quota_daily", "deadline", "auth", "network"}
+FATAL_KINDS = {"quota_daily", "deadline", "auth", "network", "disabled"}
 TOPUP_LIMIT = 40
 PAIR_LENS_PROVIDERS: set[str] = set()  # providers that get a separate rule-pair call; the lens lives in S1
 LONG_DOC_DETAIL = "документ слишком длинный для одного вызова: нарезка правилами"
@@ -65,6 +66,7 @@ REASONS = {
     "refusal": "модель отказалась отвечать",
     "deadline": "исчерпан предел времени прогона",
     "skipped": "пропущено из-за нехватки времени",
+    "disabled": "модель отключена: запуск в режиме только правил",
     "other": "ошибка вызова модели",
 }
 
@@ -305,7 +307,27 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     if family(getattr(client, "provider", "")) in PAIR_LENS_PROVIDERS and not profile.merge_set_checks:
         # the extra rule-pair call is paid for with one check batch: the run stays within 7 calls
         batch_profile = replace(profile, max_batches=min(profile.max_batches, 2))
+    from validator.pipeline import experiments as exp
+
+    dimension_pass = exp.enabled("EXP_DIMENSION_PASS")
+    entity_pass = exp.enabled("EXP_ENTITY_PASS") and not profile.merge_set_checks
+    if entity_pass:
+        # the entity call is paid for with one check batch
+        batch_profile = replace(batch_profile, max_batches=max(1, batch_profile.max_batches - 1))
+    two_pass = exp.enabled("EXP_TWO_PASS") and not profile.merge_set_checks
+    if two_pass and family(getattr(client, "provider", "")) in SEQUENTIAL_PROVIDERS:
+        # the second S1 is paid for with one check batch: a sequential run stays within 8 calls
+        batch_profile = replace(batch_profile, max_batches=max(1, batch_profile.max_batches - 1))
     batches = make_batches(reqs, batch_profile)
+    if dimension_pass and reqs:
+        batches = [reqs for _ in exp.DIMENSIONS]  # two passes over the whole set, one per group of dimensions
+    for name in exp.active():
+        run.warnings.append(f"Включён экспериментальный режим {name}.")
+    from validator.pipeline.stages import STAGE_MODEL_ENV
+
+    for stage_name, var in STAGE_MODEL_ENV.items():
+        if os.getenv(var, "").strip():
+            run.warnings.append(f"Этап {stage_name} идёт на модели {os.getenv(var, '').strip()} ({var}).")
     if fatal or not reqs:
         for key in (StageKey.CHECK, StageKey.SET_CHECK):
             run.emit(key, StageState.SKIPPED, fatal or "нет требований для проверки")
@@ -342,15 +364,35 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                 return res
             return task
 
-        check_tasks = [(f"check:{i}", timed(lambda b=b: run_check_batch(ctx, doc, b, reqs, pre.hints), optional=True,
-                                            key=StageKey.CHECK))
-                       for i, b in enumerate(batches)]
+        if dimension_pass:
+            check_tasks = [(f"check:{i}", timed(lambda d=d: run_dimension_pass(ctx, doc, reqs, d), optional=True,
+                                                key=StageKey.CHECK))
+                           for i, d in enumerate(exp.DIMENSIONS)]
+        else:
+            check_tasks = [(f"check:{i}", timed(lambda b=b: run_check_batch(ctx, doc, b, reqs, pre.hints),
+                                                optional=True, key=StageKey.CHECK))
+                           for i, b in enumerate(batches)]
+        entities_text = ""
+        if entity_pass and not doomed:
+            try:
+                er = run_entities(ctx, doc)
+                run.account(StageKey.SET_CHECK, er)
+                entities_text = exp.entity_groups(er.data, {b.id: b.text for b in doc.blocks})
+            except LLMError as exc:
+                if exc.kind == "auth":
+                    raise
+                run.warnings.append(f"Сбор сущностей не выполнен: {describe_error(exc)}.")
         if profile.merge_set_checks:
             set_tasks = [("set:merged", timed(lambda: run_merged(ctx, doc, reqs, pre.inventory, ext.skipped),
                                               optional=False))]
         else:
             set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory), optional=False)),
-                         ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped), optional=False))]
+                         ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped, entities_text),
+                                          optional=False))]
+            if two_pass:
+                # a second, independently ordered S1: union of both for recall, the critic filters
+                set_tasks.insert(1, ("set:s1r", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, second_pass=True),
+                                                      optional=True)))
             if family(getattr(client, "provider", "")) in PAIR_LENS_PROVIDERS:
                 # a smaller model misses conflicts between two functional rules: one short dedicated call
                 set_tasks.insert(1, ("set:s1b", timed(lambda: run_pairs(ctx, doc, reqs), optional=True)))
@@ -390,7 +432,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             cands, seen = builder.from_check(data.results)
             candidates.extend(cands)
             checked |= seen
-            missing.extend(x for x in b if x.id not in seen)
+            if dimension_pass:
+                checked |= {x.id for x in b}  # a dimension pass reports only requirements with findings
+            else:
+                missing.extend(x for x in b if x.id not in seen)
         for exc in failures:
             if getattr(exc, "kind", "") == "auth":
                 raise exc
@@ -434,7 +479,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             r = results[name]
             if isinstance(r, BaseException):
                 run.account(StageKey.SET_CHECK, None, getattr(r, "responses", None))
-                if name == "set:s1b":
+                if name in ("set:s1b", "set:s1r"):
                     # the extra rule-pair call is optional: its loss is noted, the stage is not partial
                     run.warnings.append(f"Дополнительная сверка пар правил не выполнена: {describe_error(r)}.")
                     continue
@@ -449,7 +494,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             set_cands = builder.from_set(sdata.findings)
             counts["set"] = counts.get("set", 0) + len(set_cands)
             candidates.extend(set_cands)
-            if name not in ("set:s1", "set:s1b"):
+            if name not in ("set:s1", "set:s1b", "set:s1r"):
                 coverage.extend(_coverage(builder, sdata, reqs))
         set_ok = len(set_failures) < len(set_names)
         if not set_failures:
@@ -549,7 +594,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     run.note_warnings()
     status = _status(run, profile.review)
-    if status != RunStatus.COMPLETE:
+    if fatal == REASONS["disabled"]:
+        run.warnings.insert(0, "Отчёт неполный: модель не запускалась (режим только правил). Для полной проверки "
+                               "впишите ключ модели в .env и запустите без --rules-only.")
+    elif status != RunStatus.COMPLETE:
         run.warnings.insert(0, "Отчёт неполный: часть этапов модели не выполнена. Повторите запуск позже, "
                                "с другой моделью или другим ключом; готовые этапы возьмутся из кэша.")
     finished = datetime.now().astimezone()

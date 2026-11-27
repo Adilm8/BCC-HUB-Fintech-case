@@ -175,8 +175,8 @@ def build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings
         # nothing was checked by the model: no permission to start, whatever the rules found
         return verdict.model_copy(update={
             "development": Readiness.NO, "testing": Readiness.NO,
-            "headline": "Начинать разработку нельзя: модель не отработала, выполнены только проверки по правилам. "
-                        "Повторите запуск."})
+            "headline": "Итог не определён: проверка неполная — выполнены только проверки по правилам, "
+                        "модель не отработала. До полной проверки начинать разработку нельзя."})
     if run_status == "partial" or unchecked:
         cap = {"development": verdict.development, "testing": verdict.testing}
         for k, v in cap.items():

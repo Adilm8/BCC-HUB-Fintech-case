@@ -23,6 +23,8 @@ def stage_of(schema: dict | None) -> str:
         return "review"
     if "coverage" in props:
         return "set"
+    if "entities" in props:
+        return "entities"
     return "other"
 
 
@@ -95,7 +97,14 @@ def default_review(prompt: str, schema: dict) -> dict:
     }
 
 
+def default_entities(prompt: str, schema: dict) -> dict:
+    blocks = _BLOCK.findall(prompt)
+    mentions = [{"block_id": b, "quote": t[:30], "unit": ""} for b, t in blocks[:2]]
+    return {"entities": [{"name": "срок", "kind": "quantity", "mentions": mentions}]}
+
+
 DEFAULTS: dict[str, Responder] = {
+    "entities": default_entities,
     "extract": default_extract, "check": default_check, "set": default_set, "review": default_review,
 }
 

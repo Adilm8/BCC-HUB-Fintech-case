@@ -132,7 +132,7 @@ class Settings:
         return replace(self, **changes)
 
     @classmethod
-    def from_env(cls) -> Settings:
+    def from_env(cls, *, require_key: bool = True) -> Settings:
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         if provider not in PROVIDERS:
             extra_provider_module()
@@ -140,7 +140,7 @@ class Settings:
             raise ValueError(f"провайдер {provider!r} не поддерживается, доступны: {', '.join(PROVIDERS)}")
         key_var, model_var, default_model, fallback_var = PROVIDERS[provider]
         key = os.getenv(key_var, "").strip() if key_var else ""
-        if key_var and not key:
+        if key_var and not key and require_key:
             raise ValueError(f"не задан {key_var}: скопируйте .env.example в .env и впишите ключ")
         if key and not key.isascii():
             raise ValueError(f"{key_var} содержит недопустимые символы: впишите настоящий ключ вместо примера")

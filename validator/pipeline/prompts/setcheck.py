@@ -20,7 +20,9 @@ criterion set_complete (не противоречие);
 - одинаковые величины с разными значениями, единицами, форматами или типами в разных местах;
 - коды ответов и результаты, которые по-разному описаны в логике, перечне статусов и примерах;
 - назначение, которое описано по-разному в разных полях одной спецификации;
-- бизнес-логику другой системы, записанную внутри спецификации интерфейса (смешение уровней);
+- бизнес-логику или правило другой системы или сервиса, записанное внутри спецификации интерфейса (смешение \
+уровней: интерфейс одного сервиса описывает поведение, за которое отвечает другой) — находка set_check other, \
+criterion appropriate, severity major;
 - для каждого флага или переключателя: где задаётся, где читается и где влияет на поведение; обязательны ли \
 остальные параметры, когда он выключен;
 - для каждой величины, которую видит пользователь или использует другая система: какая операция или \
@@ -107,21 +109,33 @@ def _common(doc: Document, reqs: list[Requirement], include_document: bool) -> l
 
 
 def build_s1_prompt(doc: Document, reqs: list[Requirement], inventory: list[InventoryItem], *,
-                    include_document: bool = True, merged_with_s2: str | None = None) -> str:
-    parts = _common(doc, reqs, include_document)
+                    include_document: bool = True, merged_with_s2: str | None = None, pairs: str = "",
+                    second_pass: bool = False) -> str:
+    parts = _common(doc, list(reversed(reqs)) if second_pass else reqs, include_document)
     parts.append("<parts>\n" + "\n".join(f"- {p}" for p in doc.parts) + "\n</parts>" if doc.parts else
                  "<parts>документ из одной части</parts>")
     if inventory:
         parts.append("<inventory>\n" + inventory_table(inventory) + "\n</inventory>")
+    if pairs:
+        parts.append("<pairs>\n" + pairs + "\n</pairs>")
     parts.append(SET_EXAMPLES)
-    parts.append(S1_TASK)
+    task = S1_TASK
+    if pairs:
+        from validator.pipeline.experiments import PAIRS_INSTRUCTION
+
+        task += "\n" + PAIRS_INSTRUCTION
+    if second_pass:
+        from validator.pipeline.experiments import SECOND_PASS_NOTE
+
+        task += "\n" + SECOND_PASS_NOTE
+    parts.append(task)
     if merged_with_s2:
         parts.append(merged_with_s2)
     return "\n\n".join(parts)
 
 
 def build_s2_prompt(doc: Document, reqs: list[Requirement], skipped: list[SkippedBlock], *,
-                    include_document: bool = True) -> str:
+                    include_document: bool = True, entities: str = "") -> str:
     parts = _common(doc, reqs, include_document)
     acc = [r for r in reqs if r.kind == ReqKind.ACCEPTANCE_CRITERION]
     parts.append("<acceptance_criteria>\n" + (requirement_table(acc) if acc else "в документе нет критериев приёмки")
@@ -129,6 +143,13 @@ def build_s2_prompt(doc: Document, reqs: list[Requirement], skipped: list[Skippe
     if skipped:
         parts.append("<skipped_blocks>\n" + "\n".join(f"{s.block_id} | {s.reason} | {s.text[:150]}" for s in skipped[:80])
                      + "\n</skipped_blocks>")
+    if entities:
+        from validator.pipeline.experiments import ENTITY_CHECKLIST
+
+        parts.append("<entities>\n" + entities + "\n</entities>")
+        parts.append(SET_EXAMPLES)
+        parts.append(S2_TASK + "\n\n" + ENTITY_CHECKLIST)
+        return "\n\n".join(parts)
     parts.append(SET_EXAMPLES)
     parts.append(S2_TASK)
     return "\n\n".join(parts)

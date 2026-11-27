@@ -278,10 +278,16 @@ def call_structured(
     temperature: float | None = None,
     max_output_tokens: int | None = None,
     allow_retry: bool = True,
+    model: str | None = None,
 ) -> StructuredResult:
     """One structured call with local repair and at most one corrective retry."""
     schema = provider_schema(model_cls)
-    model_name = getattr(client, "model", "") or ""
+    from validator.pipeline import experiments as exp
+
+    if exp.enabled("EXP_SCHEMA_REASONING_FIRST"):
+        schema = exp.reasoning_first(schema)
+    model_name = model or getattr(client, "model", "") or ""
+    routed = {"model": model} if model else {}  # sent only when a stage is routed to another model
     key = StageCache.key(model_name, system, prompt, schema, effort=effort, temperature=temperature)
     hit = cache.get(key)
     if hit is not None:
@@ -298,7 +304,7 @@ def call_structured(
             raise BudgetExceeded()
         resp = client.complete(
             current, system=system, json_schema=schema, temperature=temperature, effort=effort,
-            max_output_tokens=max_output_tokens, deadline=deadline,
+            max_output_tokens=max_output_tokens, deadline=deadline, **routed,
         )
         responses.append(resp)
         try:

@@ -235,3 +235,64 @@ def test_non_ascii_key_is_rejected(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "ваш_ключ")
     with pytest.raises(ValueError, match="недопустимые"):
         Settings.from_env()
+
+
+def test_experiments_are_off_by_default_and_each_toggle_works(monkeypatch):
+    from validator.pipeline import experiments as exp
+
+    base = FakeLLM()
+    run_pipeline(raw_doc(), settings(), client=base)
+    base_stages = [s for s, _ in base.calls]
+    assert "entities" not in base_stages and exp.active() == []
+
+    monkeypatch.setenv("EXP_REPEAT_INSTRUCTION", "1")
+    f = FakeLLM()
+    run_pipeline(raw_doc(), settings(), client=f)
+    check_prompt = next(p for s, p in f.calls if s == "check")
+    assert check_prompt.startswith("Задание") and check_prompt.count("Задание: проверь") == 2
+    monkeypatch.delenv("EXP_REPEAT_INSTRUCTION")
+
+    monkeypatch.setenv("EXP_SCHEMA_REASONING_FIRST", "1")
+    seen = {}
+
+    class Spy(FakeLLM):
+        def complete(self, prompt, **kw):
+            if stage_of(kw.get("json_schema")) == "check":
+                seen["schema"] = kw["json_schema"]
+            return super().complete(prompt, **kw)
+
+    from tests.fakes import stage_of
+
+    rep = run_pipeline(raw_doc(), settings(), client=Spy())
+    item = seen["schema"]["properties"]["results"]["items"]["properties"]["findings"]["items"]
+    assert next(iter(item["properties"])) == "reasoning" and rep.findings
+    monkeypatch.delenv("EXP_SCHEMA_REASONING_FIRST")
+
+    monkeypatch.setenv("EXP_ENTITY_PASS", "1")
+    f = FakeLLM()
+    rep = run_pipeline(raw_doc(), settings(), client=f)
+    stages = [s for s, _ in f.calls]
+    assert "entities" in stages and rep.run.llm_calls <= 7
+    s2 = [p for s, p in f.calls if s == "set" and "<entities>" in p]
+    assert s2
+    monkeypatch.delenv("EXP_ENTITY_PASS")
+
+    monkeypatch.setenv("EXP_DIMENSION_PASS", "1")
+    f = FakeLLM()
+    rep = run_pipeline(raw_doc(), settings(), client=f)
+    checks = [p for s, p in f.calls if s == "check"]
+    assert len(checks) == 2 and all("измерениям" in p for p in checks)
+    assert all(r.check_status == "checked" for r in rep.requirements)
+
+
+def test_two_pass_set_check_adds_one_reordered_s1_call(monkeypatch):
+    base = FakeLLM()
+    rep0 = run_pipeline(raw_doc(), settings(), client=base)
+    monkeypatch.setenv("EXP_TWO_PASS", "1")
+    f = FakeLLM()
+    rep = run_pipeline(raw_doc(), settings(), client=f)
+    sets = [p for s, p in f.calls if s == "set"]
+    assert len(sets) == len([s for s, _ in base.calls if s == "set"]) + 1
+    assert any("второй, независимый проход" in p for p in sets)
+    assert rep.run.llm_calls == rep0.run.llm_calls + 1 <= 8
+    assert rep.run.status == rep0.run.status

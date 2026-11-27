@@ -14,7 +14,7 @@ from validator.config import Settings, extra_provider_module
 
 ErrorKind = Literal[
     "quota_daily", "rate_limit", "timeout", "server", "auth", "bad_request", "invalid_json", "network", "refusal",
-    "deadline", "skipped", "other"
+    "deadline", "skipped", "disabled", "other"
 ]
 
 # only an explicit per-day quota is daily; "quota exceeded for metric" is also sent for per-minute limits
@@ -175,8 +175,9 @@ class LLMClient:
     def model(self) -> str:
         return self._settings.model
 
-    def _models(self) -> list[str]:
-        models = [m for m in (self._settings.model, *self._settings.fallback_models)]
+    def _models(self, primary: str | None = None) -> list[str]:
+        first = primary or self._settings.model
+        models = [first, *(m for m in self._settings.fallback_models if m != first)]
         with self._lock:
             alive = [m for m in models if m not in self._exhausted]
         if not alive:
@@ -193,15 +194,18 @@ class LLMClient:
         effort: str | None = None,
         max_output_tokens: int | None = None,
         deadline: float | None = None,
+        model: str | None = None,
     ) -> LLMResponse:
-        """One logical call. `deadline` is a time.monotonic() value after which no attempt starts."""
+        """One logical call. `deadline` is a time.monotonic() value after which no attempt starts; `model`
+        replaces the primary model for this call (the fallbacks stay)."""
         s = self._settings
         errors: list[str] = []
         last_kind: ErrorKind = "other"
         attempts = 0
         started = time.monotonic()
         notes: list[str] = []
-        for index, model in enumerate(self._models()):
+        chain = self._models(model)
+        for index, model in enumerate(chain):  # noqa: PLR1704
             if index > 0:
                 self._note(notes, f"переход на запасную модель {model}")
             timeouts = 0
@@ -424,6 +428,20 @@ class AnthropicClient(LLMClient):
 def _mentions_schema(exc: BaseException) -> bool:
     low = str(exc).lower()
     return any(m in low for m in ("output_config", "json_schema", "schema", "format"))
+
+
+class DisabledClient(LLMClient):
+    """No model at all: every call fails at once, so the run keeps only the rule checks."""
+
+    def __init__(self, settings: Settings):
+        super().__init__(settings)
+        self.provider = settings.provider
+
+    def complete(self, prompt: str, **kw) -> LLMResponse:
+        raise LLMError("запуск в режиме только правил", "disabled")
+
+    def _call(self, model, prompt, **kw) -> LLMResponse:  # pragma: no cover - complete() never gets here
+        raise LLMError("запуск в режиме только правил", "disabled")
 
 
 def make_client(settings: Settings) -> LLMClient:

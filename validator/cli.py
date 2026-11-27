@@ -83,6 +83,8 @@ def _main(argv: list[str] | None) -> int:
     parser.add_argument("--no-json", action="store_true", help="не записывать отчёт JSON")
     parser.add_argument("--no-cache", action="store_true", help="не использовать кэш этапов")
     parser.add_argument("--profile", choices=sorted(PROFILES), default=None, help="профиль вызовов модели")
+    parser.add_argument("--rules-only", action="store_true",
+                        help="проверить только правилами, без модели (ключ не нужен; итог не определён)")
     args = parser.parse_args(argv)
     if _same_file(args.input, args.output) or (args.json is not None and _same_file(args.input, args.json)):
         print("Ошибка: путь отчёта совпадает с входным документом; укажите другой файл отчёта.", file=sys.stderr)
@@ -93,8 +95,10 @@ def _main(argv: list[str] | None) -> int:
 
     load_dotenv()
     try:
-        settings = Settings.from_env()
+        settings = Settings.from_env(require_key=not args.rules_only)
         overrides = {}
+        if args.rules_only:
+            overrides["cache_enabled"] = False  # a cached model answer would turn this into a model run
         if args.profile:
             overrides["profile_name"] = args.profile
         if args.no_cache:
@@ -103,8 +107,15 @@ def _main(argv: list[str] | None) -> int:
             settings = settings.with_overrides(**overrides)
         from validator.pipeline import run_pipeline
 
-        print(f"Проверка {args.input} (профиль {settings.profile.name})", file=sys.stderr, flush=True)
-        report = run_pipeline(args.input, settings, on_event=_progress)
+        client = None
+        if args.rules_only:
+            from validator.llm import DisabledClient
+
+            client = DisabledClient(settings)
+            print(f"Проверка {args.input} только правилами, без модели", file=sys.stderr, flush=True)
+        else:
+            print(f"Проверка {args.input} (профиль {settings.profile.name})", file=sys.stderr, flush=True)
+        report = run_pipeline(args.input, settings, on_event=_progress, client=client)
     except (ValueError, FileNotFoundError) as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
         return 2
