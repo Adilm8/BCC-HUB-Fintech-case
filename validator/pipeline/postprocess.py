@@ -893,6 +893,20 @@ RULE_OPTIONS: dict[str, list[str]] = {
     "duplicate_id": ["Перенумеровать повторяющиеся идентификаторы", "Это одно требование: объединить записи"],
     "numbering_gap": ["Пропуск намеренный: требование удалено", "Требование потеряно: восстановить его"],
     "dangling_reference": ["Добавить недостающий раздел или требование", "Исправить ссылку на существующий пункт"],
+    "api_get_write_side_effect": ["Изменение выполняется методом POST или PUT с параметрами в теле запроса",
+                                  "Оставить GET и обосновать, почему изменение состояния допустимо"],
+    "api_status_code_conflict": ["Оставить код из перечня статусов и исправить текст подраздела",
+                                 "Оставить код из текста подраздела и добавить его в перечень статусов"],
+    "api_undeclared_status_code": ["Добавить код в перечень статусов с описанием и примером",
+                                   "Заменить код в тексте на один из объявленных"],
+    "api_success_code_error_body": ["Ошибка возвращается с кодом ошибки из перечня и единым телом ошибки",
+                                    "Ошибка возвращается с кодом успеха и признаком ошибки: исправить перечень"],
+    "api_status_heading_mismatch": ["Исправить заголовок подраздела под описанный код",
+                                    "Исправить описание под код из заголовка"],
+    "api_req_resp_type_mismatch": ["Привести поле к одному типу в запросе и ответе",
+                                   "Различие намеренное: описать преобразование типа"],
+    "api_body_content_type_unused": ["Убрать Content-Type для запроса без тела", "Описать тело запроса"],
+    "api_get_with_body": ["Убрать тело из запроса GET", "Сменить метод на POST или PUT"],
 }
 GENERIC_OPTIONS = ["Уточнить формулировку в документе до начала разработки",
                    "Оставить как есть и зафиксировать допущение команды"]
@@ -911,6 +925,8 @@ def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
         return c.addressee
     text = f"{c.explanation} {c.question}"
     if c.source == FindingSource.RULE:
+        if c.rule.startswith("api_"):
+            return "analyst"  # interface contract questions go to the API owner
         where = " ".join([text, *(e.section for e in c.evidence), *(e.quote for e in c.evidence)])
         if re.search(r"тестир|приёмк|приемк", where, re.IGNORECASE):
             return "qa"

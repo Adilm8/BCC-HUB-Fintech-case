@@ -8,6 +8,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -43,13 +44,14 @@ from validator.pipeline.stages import StageContext
 from validator.pipeline.stages.check import make_batches, run_check_batch
 from validator.pipeline.stages.extract import run_extract
 from validator.pipeline.stages.review import run_review
-from validator.pipeline.stages.setcheck import run_merged, run_s1, run_s2
+from validator.pipeline.stages.setcheck import run_merged, run_pairs, run_s1, run_s2
 from validator.pipeline.structured import Budget, BudgetExceeded, StageCache, StructuredResult
 from validator.pipeline.verdict import build_questions, build_summary, build_verdict
 
 LLM_STAGES = (StageKey.EXTRACT, StageKey.CHECK, StageKey.SET_CHECK, StageKey.REVIEW)
 FATAL_KINDS = {"quota_daily", "deadline", "auth", "network"}
 TOPUP_LIMIT = 40
+PAIR_LENS_PROVIDERS: set[str] = {"gemini"}  # providers that get the separate rule-pair call (S1b)
 LONG_DOC_DETAIL = "документ слишком длинный для одного вызова: нарезка правилами"
 
 REASONS = {
@@ -299,7 +301,11 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     set_ok = False
 
     # ---------------------------------------------------------- wave: check batches + set checks
-    batches = make_batches(reqs, profile)
+    batch_profile = profile
+    if getattr(client, "provider", "") in PAIR_LENS_PROVIDERS and not profile.merge_set_checks:
+        # the extra rule-pair call is paid for with one check batch: the run stays within 7 calls
+        batch_profile = replace(profile, max_batches=min(profile.max_batches, 2))
+    batches = make_batches(reqs, batch_profile)
     if fatal or not reqs:
         for key in (StageKey.CHECK, StageKey.SET_CHECK):
             run.emit(key, StageState.SKIPPED, fatal or "нет требований для проверки")
@@ -331,6 +337,9 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         else:
             set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory), optional=False)),
                          ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped), optional=False))]
+            if getattr(client, "provider", "") in PAIR_LENS_PROVIDERS:
+                # a smaller model misses conflicts between two functional rules: one short dedicated call
+                set_tasks.insert(1, ("set:s1b", timed(lambda: run_pairs(ctx, doc, reqs), optional=True)))
         workers = 1 if getattr(client, "provider", "") == "gemini" else max(1, profile.parallel)
         # one call at a time: the set checks find the critical contradictions, so they go first and the
         # per-requirement batches are the ones dropped when time runs out
@@ -410,8 +419,12 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         for name in set_names:
             r = results[name]
             if isinstance(r, BaseException):
-                set_failures.append((name, r))
                 run.account(StageKey.SET_CHECK, None, getattr(r, "responses", None))
+                if name == "set:s1b":
+                    # the extra rule-pair call is optional: its loss is noted, the stage is not partial
+                    run.warnings.append(f"Дополнительная сверка пар правил не выполнена: {describe_error(r)}.")
+                    continue
+                set_failures.append((name, r))
                 if getattr(r, "kind", "") == "auth":
                     raise r
                 fatal_from(r)
@@ -422,7 +435,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             set_cands = builder.from_set(sdata.findings)
             counts["set"] = counts.get("set", 0) + len(set_cands)
             candidates.extend(set_cands)
-            if name != "set:s1":
+            if name not in ("set:s1", "set:s1b"):
                 coverage.extend(_coverage(builder, sdata, reqs))
         set_ok = len(set_failures) < len(set_names)
         if not set_failures:

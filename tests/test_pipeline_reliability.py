@@ -147,3 +147,31 @@ def test_daily_quota_switches_to_fallback_without_waiting(monkeypatch):
     r = c.complete("p")
     assert r.model == "m2" and not slept
     assert any("дневная квота" in n for n in r.notes) and any("запасную модель" in n for n in r.notes)
+
+
+def test_gemini_gets_the_rule_pair_call_within_seven_calls():
+    fake = SequentialFake()
+    rep = run_pipeline(raw_doc(), settings(), client=fake)
+    prompts = [p for s, p in fake.calls if s == "set"]
+    assert any("S1b" in p for p in prompts)
+    assert rep.run.llm_calls <= 7
+
+
+def test_other_providers_do_not_get_the_rule_pair_call():
+    fake = FakeLLM()
+    run_pipeline(raw_doc(), settings(), client=fake)
+    assert not any("S1b" in p for s, p in fake.calls if s == "set")
+
+
+def test_linter_flags_code_declared_but_other_code_prescribed_under_its_heading():
+    from pathlib import Path
+
+    from validator.loaders import load_document
+    from validator.rules import run_prechecks
+    from validator.structure import parse_structure
+
+    root = Path(__file__).resolve().parents[1]
+    doc = parse_structure(load_document(root / "docs" / "requirements.md"))
+    found = [f for f in run_prechecks(doc).findings if f.rule == "api_status_code_conflict"]
+    assert found and found[0].severity == "critical"
+    assert "403" in found[0].explanation and "404" in found[0].explanation
