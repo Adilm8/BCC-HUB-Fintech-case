@@ -24,16 +24,18 @@ python -m validator docs/requirements.md reports/report.md
 | --- | --- | --- | --- | --- |
 | [`reports/report.md`](reports/report.md) — основной | Anthropic `claude-sonnet-5-5`, глубина рассуждения `high` (`LLM_EFFORT=high`) | 24 из 27 | 7 из 7 | 6 / ~6 мин, ~$1.0 |
 | [`reports/gemini-3.8-flash/report.md`](reports/gemini-3.8-flash/report.md) | Google `gemini-3.8-flash` через OpenRouter (`LLM_PROVIDER=openrouter`), глубина рассуждения `high`, `LLM_MAX_OUTPUT_TOKENS=64000` | 24 из 27 | 7 из 7 | 8 / ~25 мин, ~$0.82 |
+| [`reports/gemini-3.5-flash/report.md`](reports/gemini-3.5-flash/report.md) — модель по умолчанию | Google `gemini-3.5-flash` через OpenRouter, глубина рассуждения по умолчанию | 22 из 27 | 7 из 7 | 6 / ~6 мин |
 
 \* Оценка LLM-судьёй по нашему эталону из 27 дефектов: `gemini-3.8-flash` сравнивает находки с эталоном по смыслу.
 
 ## Проверка без ключа и сети
 
-Оба отчёта пересобираются из сохранённых ответов модели — **без ключа и сети**:
+Все три отчёта пересобираются из сохранённых ответов модели — **без ключа и сети**:
 
 ```bash
 python -m validator docs/requirements.md out.md --replay reports/trace                    # claude-sonnet-5-5
 python -m validator docs/requirements.md out.md --replay reports/gemini-3.8-flash/trace   # gemini-3.8-flash
+python -m validator docs/requirements.md out.md --replay reports/gemini-3.5-flash/trace   # gemini-3.5-flash
 ```
 
 Без ключа работает и `--rules-only`: только детерминированные проверки, вердикт «итог не определён».

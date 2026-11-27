@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "provider": "openrouter",
+  "family": "gemini",
+  "model": "google/gemini-3.5-flash",
+  "fallback_models": [],
+  "profile": "standard",
+  "max_context_chars": 120000,
+  "domain": "",
+  "env": {
+    "EXP_REMARKS": "0",
+    "EXP_COMPLETENESS_ITEMS": "1",
+    "EXP_DOMAIN": "1",
+    "EXP_BOUNDARY_RULE": "1",
+    "EXP_GLOSSARY": "1",
+    "EXP_STATES": "1",
+    "EXP_SINGULAR_RULE": "0",
+    "EXP_ABBREV_RULE": "0",
+    "EXP_FAILURE_RULE": "0",
+    "EXP_NFR_RULE": "1",
+    "EXP_NOTIFY_RULE": "1",
+    "EXP_MIXED_RULE": "1",
+    "EXP_NO_REVIEW": "0"
+  }
+}
