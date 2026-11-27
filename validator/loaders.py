@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+import logging
 import math
 import re
 import zipfile
@@ -49,6 +51,7 @@ _LIST_START_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
 _DOCX_HEADING_RE = re.compile(r"^(?:Heading|Заголовок)\s*([1-6])$", re.IGNORECASE)
 _DOCX_BULLET_STYLES = ("list bullet", "маркированный список")
 _DOCX_NUMBER_STYLES = ("list number", "нумерованный список")
+_CP1251_VALID_SYMBOLS = frozenset("\u00a0«»—–№…“”‘’„•§©®°±€₽™·")
 
 
 @dataclass(frozen=True)
@@ -82,7 +85,7 @@ def load_document(path: Path) -> RawDocument:
 
     warnings: list[str] = []
     if fmt in ("md", "txt"):
-        text = _read_text_file(file_path)
+        text, warnings = _read_text_file(file_path)
     elif fmt == "docx":
         text, warnings = _docx_to_markdown(file_path)
     else:
@@ -110,13 +113,54 @@ def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _read_text_file(path: Path) -> str:
+def _read_text_file(path: Path) -> tuple[str, list[str]]:
+    raw_bytes = path.read_bytes()
+
+    # 1. Default UTF-8 (with optional UTF-8 BOM), no warning.
     try:
-        return path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValueError(
-            f"Не удалось прочитать файл {path.name} в кодировке UTF-8: проверьте кодировку."
-        ) from exc
+        return raw_bytes.decode("utf-8-sig"), []
+    except UnicodeDecodeError:
+        pass
+
+    # 2. UTF-16 with BOM (LE or BE, excluding UTF-32 LE which shares the first two bytes).
+    if raw_bytes.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) and not raw_bytes.startswith(
+        codecs.BOM_UTF32_LE
+    ):
+        try:
+            text = raw_bytes.decode("utf-16")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"Не удалось прочитать файл {path.name}: повреждённая кодировка UTF-16."
+            ) from exc
+        if "\x00" not in text:
+            return text, [f"Файл {path.name} прочитан в кодировке UTF-16 (вместо UTF-8)."]
+
+    # 3. Fallback to Windows-1251 (cp1251) when bytes look like valid text.
+    if b"\x00" not in raw_bytes:
+        try:
+            text = raw_bytes.decode("cp1251")
+        except UnicodeDecodeError:
+            text = ""
+        if text and _is_plausible_cp1251(text):
+            return text, [f"Файл {path.name} прочитан в кодировке cp1251 (вместо UTF-8)."]
+
+    raise ValueError(
+        f"Не удалось прочитать файл {path.name}: поддерживаются кодировки UTF-8, UTF-16 (с BOM) и cp1251."
+    )
+
+
+def _is_plausible_cp1251(text: str) -> bool:
+    for ch in text:
+        code = ord(ch)
+        if (code < 32 and ch not in "\t\n\r\f\v") or code == 127:
+            return False
+    non_ascii = [ch for ch in text if ord(ch) >= 128]
+    if not non_ascii:
+        return True
+    valid = sum(
+        1 for ch in non_ascii if "\u0400" <= ch <= "\u04ff" or ch in _CP1251_VALID_SYMBOLS
+    )
+    return (valid / len(non_ascii)) >= 0.7
 
 
 def _docx_to_markdown(path: Path) -> tuple[str, list[str]]:
@@ -137,18 +181,26 @@ def _docx_to_markdown(path: Path) -> tuple[str, list[str]]:
         warnings.append(
             "В документе DOCX есть изображения или диаграммы — они не анализировались."
         )
+    if _docx_has_body_nodes(doc, ("txbxContent",)):
+        warnings.append(
+            "В документе DOCX есть текстовые поля (надписи) — часть текста могла не извлечься."
+        )
+    if _docx_has_body_nodes(doc, ("sdt",)):
+        warnings.append(
+            "В документе DOCX есть элементы управления содержимым (SDT) — часть текста могла не извлечься."
+        )
 
     out: list[str] = []
     prev_kind = ""
     num_counter = 0
+    has_nested_tables = False
 
     for block in doc.iter_inner_content():
         if isinstance(block, Table):
             num_counter = 0
-            rows = [
-                [re.sub(r"\s+", " ", c.text.strip()).replace("|", "/") for c in r.cells]
-                for r in block.rows
-            ]
+            rows, nested = _extract_docx_table_rows(block)
+            if nested:
+                has_nested_tables = True
             if not rows:
                 continue
             if out and out[-1] != "":
@@ -208,19 +260,80 @@ def _docx_to_markdown(path: Path) -> tuple[str, list[str]]:
             out.append(text)
             prev_kind = "paragraph"
 
+    if has_nested_tables:
+        warnings.append(
+            "В документе DOCX есть вложенные таблицы — их строки включены в общую таблицу."
+        )
+
     return "\n".join(out).strip(), warnings
+
+
+def _docx_cell_content(cell: object) -> tuple[str, list[list[str]], bool]:
+    """Extract paragraph text and recursively flattened nested table rows from a DOCX cell."""
+    from docx.table import Table
+
+    text_parts: list[str] = []
+    nested_rows: list[list[str]] = []
+    has_nested = False
+
+    for item in cell.iter_inner_content():  # type: ignore[attr-defined]
+        if isinstance(item, Table):
+            has_nested = True
+            child_rows, _ = _extract_docx_table_rows(item)
+            nested_rows.extend(child_rows)
+        else:
+            cleaned = re.sub(r"\s+", " ", item.text.strip()).replace("|", "/")
+            if cleaned:
+                text_parts.append(cleaned)
+
+    return " ".join(text_parts), nested_rows, has_nested
+
+
+def _extract_docx_table_rows(table: object) -> tuple[list[list[str]], bool]:
+    """Convert a DOCX table to pipe-table rows, collapsing merged cells and recursing into nested tables."""
+    rows: list[list[str]] = []
+    has_nested = False
+
+    for row in table.rows:  # type: ignore[attr-defined]
+        cells_text: list[str] = []
+        nested_after_row: list[list[str]] = []
+        prev_tc = None
+
+        for cell in row.cells:
+            # Skip repeated references to the same underlying <w:tc> from horizontal cell merges.
+            tc = getattr(cell, "_tc", None)
+            if tc is not None and tc is prev_tc:
+                continue
+            prev_tc = tc
+
+            cell_text, child_rows, cell_has_nested = _docx_cell_content(cell)
+            cells_text.append(cell_text)
+            if cell_has_nested:
+                has_nested = True
+                nested_after_row.extend(child_rows)
+
+        if cells_text and (any(cells_text) or not nested_after_row):
+            rows.append(cells_text)
+        rows.extend(nested_after_row)
+
+    return rows, has_nested
 
 
 def _docx_has_images(doc: object) -> bool:
     inline = getattr(doc, "inline_shapes", None)
     if inline is not None and len(inline) > 0:
         return True
+    return _docx_has_body_nodes(doc, ("drawing", "pict"))
+
+
+def _docx_has_body_nodes(doc: object, local_names: tuple[str, ...]) -> bool:
     element = getattr(doc, "element", None)
     body = getattr(element, "body", None)
     if body is None or not hasattr(body, "xpath"):
         return False
+    cond = " or ".join(f"local-name()='{name}'" for name in local_names)
     try:
-        return bool(body.xpath(".//*[local-name()='drawing' or local-name()='pict']"))
+        return bool(body.xpath(f".//*[{cond}]"))
     except (AttributeError, TypeError, ValueError):
         return False
 
@@ -229,6 +342,8 @@ def _pdf_to_markdown(path: Path) -> tuple[str, list[str]]:
     """Extract PDF text per page, strip repeated headers/footers, de-hyphenate, and detect headings."""
     from pypdf import PdfReader
     from pypdf.errors import PdfReadError
+
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
 
     try:
         reader = PdfReader(str(path))

@@ -280,6 +280,7 @@ def test_critic_generic_drop_of_major_finding_downgrades_it():
 
     base = run(FakeLLM())
     rep = run(FakeLLM({"review": review}))
-    base_minor = base.summary.findings_by_severity.get("minor", 0)
-    assert rep.summary.findings_total == base.summary.findings_total - base_minor
+    # verified model findings stay (as minor); rule findings and minor ones may be removed
+    kept = [f for f in [*base.findings, *base.set_findings] if f.source == "llm" and f.severity != "minor"]
+    assert rep.summary.findings_total == len(kept)
     assert all(f.severity == "minor" for f in rep.findings)

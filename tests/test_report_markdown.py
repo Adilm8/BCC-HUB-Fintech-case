@@ -133,7 +133,8 @@ def test_render_sample_report_snapshot_and_invariants():
     assert "Служебных и пропущенных блоков: 1 (служебная информация — 1)." in md
 
     # Per-requirement check: full major, one-line minor, clean requirement, unchecked requirement.
-    assert "Нарушений по п. 5.2.5 не выявлено." in md
+    assert "### Требования без собственных нарушений" in md
+    assert "Нарушений по п. 5.2.5 ISO/IEC/IEEE 29148 не выявлено у" in md
     assert "не проверено" in md
     assert "ISO/IEC/IEEE 29148:2018, п. 5.2.5 — проверяемость" in md
     assert "#### [Существенный] D-001" in md
@@ -154,7 +155,7 @@ def test_render_sample_report_snapshot_and_invariants():
     # Summary numbers consistent with report.summary.
     summary_section = md.split("## Сводка", 1)[1].split("## Вопросы к автору ТЗ", 1)[0]
     assert f"| Всего требований | {report.summary.requirements_total} |" in summary_section
-    assert f"| Требований с нарушениями | {report.summary.requirements_with_findings} |" in summary_section
+    assert f"| Требований с собственными нарушениями | {report.summary.requirements_with_findings} |" in summary_section
     assert f"| Непроверенных требований | {report.summary.requirements_not_checked} |" in summary_section
     assert f"| Всего нарушений | {report.summary.findings_total} |" in summary_section
     assert f"| Вопросов к автору ТЗ | {report.summary.questions_total} |" in summary_section

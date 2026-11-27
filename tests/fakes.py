@@ -59,7 +59,7 @@ def default_check(prompt: str, schema: dict) -> dict:
                 "explanation": f"Во фрагменте «{' '.join(words[:3])}» не задано измеримое значение и условие проверки.",
                 "criterion": "verifiable", "severity": "major",
                 "recommendation": "Указать число, единицу и условие измерения.",
-                "clarifying_question": "Какое значение считается выполнением требования",
+                "clarifying_question": "Какое значение считается выполнением требования", "addressee": "analyst",
                 "answer_options": ["вариант 1", "вариант 2"], "related_requirement_ids": [],
             })
         results.append({"requirement_id": rid, "findings": findings})
@@ -78,6 +78,7 @@ def default_set(prompt: str, schema: dict) -> dict:
             "explanation": "Два места документа описывают одно и то же поведение по-разному, реализация неоднозначна.",
             "set_check": "contradiction", "criterion": "set_consistent", "severity": "critical",
             "recommendation": "Согласовать оба места.", "clarifying_question": "Какое из двух описаний верное?",
+            "addressee": "business",
             "answer_options": ["первое", "второе"],
         })
     coverage = [{"requirement_id": r.group(1), "acceptance_ids": [], "status": "none", "note": ""}

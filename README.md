@@ -21,7 +21,7 @@ cp .env.example .env
 
 ## Установка и запуск
 
-Нужен Python 3.10+.
+Нужен Python 3.11+.
 
 ```bash
 pip install -r requirements.txt

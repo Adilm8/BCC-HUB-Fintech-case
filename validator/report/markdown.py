@@ -33,12 +33,38 @@ from validator.report.labels import (
     SEVERITY_PLURAL_LABELS,
     SKIPPED_REASON_LABELS,
     STAGE_STATE_LABELS,
+    addressee_label,
     criterion_label,
     criterion_ref,
     defect_class_label,
     req_kind_label,
     set_check_label,
 )
+
+
+def _short(text: str, limit: int = 120) -> str:
+    """Cut at a word boundary and mark the cut with an ellipsis."""
+    t = " ".join((text or "").split())
+    if len(t) <= limit:
+        return t
+    cut = t[: limit - 1]
+    space = cut.rfind(" ")
+    if space >= limit // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,.;:—-") + "…"
+
+
+def _norm(text: str) -> str:
+    return " ".join((text or "").lower().replace("ё", "е").split()).strip(" .…")
+
+
+def _set_refs(report: Report) -> dict[str, list[str]]:
+    refs: dict[str, list[str]] = defaultdict(list)
+    for sf in report.set_findings:
+        for rid in sf.requirement_ids:
+            if sf.id not in refs[rid]:
+                refs[rid].append(sf.id)
+    return refs
 
 
 def _escape_cell(value: str) -> str:
@@ -163,6 +189,16 @@ def _render_passport(report: Report) -> list[str]:
                 f"| {_escape_cell(stage.title)} | {_escape_cell(state_ru)} | {model_cell} | "
                 f"{stage.llm_calls} | {tokens_cell} | {stage.seconds:.2f} | {detail_cell} |"
             )
+        by_key = {s.key: s for s in run.stages}
+        check, set_check = by_key.get("check"), by_key.get("set_check")
+        if check and set_check and check.llm_calls and set_check.llm_calls:
+            lines.extend([
+                "",
+                (
+                    "Этапы «Проверка каждого требования» и «Проверка набора требований» выполняются параллельно: "
+                    "их время перекрывается, поэтому сумма времени этапов больше общей длительности прогона."
+                ),
+            ])
 
     return lines
 
@@ -185,7 +221,8 @@ def _render_short_summary(report: Report) -> list[str]:
         "",
         (
             f"- **Требований выделено:** {summary.requirements_total} "
-            f"(с нарушениями — {summary.requirements_with_findings}, "
+            f"(с собственными нарушениями — {summary.requirements_with_findings}, "
+            f"затронуты только находками набора — {summary.requirements_in_set_findings_only}, "
             f"не проверено — {summary.requirements_not_checked})."
         ),
         (
@@ -221,13 +258,17 @@ def _render_slicing(report: Report) -> list[str]:
             ]
         )
         for req in report.requirements:
+            title = _short(req.title)
+            nt, nq = _norm(req.title), _norm(req.quote)
+            same = nt == nq or (nt and nq.startswith(nt)) or (nq and nt.startswith(nq))
+            quote_cell = "совпадает с формулировкой" if same and len(req.quote) <= 120 else req.quote
             lines.append(
                 f"| {_escape_cell(req.id)} "
                 f"| {_escape_cell(_format_doc_id(req))} "
                 f"| {_escape_cell(req.section)} "
                 f"| {_escape_cell(req_kind_label(req.kind))} "
-                f"| {_escape_cell(req.title)} "
-                f"| {_escape_cell(req.quote)} |"
+                f"| {_escape_cell(title)} "
+                f"| {_escape_cell(quote_cell)} |"
             )
 
     lines.append("")
@@ -284,7 +325,7 @@ def _render_full_finding(finding: BaseFinding, heading_title: str) -> list[str]:
     lines.extend(_render_evidence_lines(finding.evidence))
     lines.append(f"- **Объяснение:** {finding.explanation}")
     lines.append(f"- **Рекомендация:** {finding.recommendation}")
-    lines.append(f"- **Уточняющий вопрос:** {finding.clarifying_question}")
+    lines.append(f"- **Уточняющий вопрос** ({addressee_label(finding.addressee)}): {finding.clarifying_question}")
     if finding.answer_options:
         lines.append("- **Варианты ответа:**")
         for opt in finding.answer_options:
@@ -328,19 +369,26 @@ def _render_per_requirement(report: Report) -> list[str]:
         if not matched:
             orphan_findings.append(finding)
 
+    set_refs = _set_refs(report)
+    clean: list[Requirement] = []
     for req in report.requirements:
+        req_findings = sorted(
+            findings_by_req.get(req.id, []),
+            key=lambda f: (SEVERITY_RANK[f.severity], f.id),
+        )
+        if not req_findings and req.check_status != "not_checked":
+            clean.append(req)
+            continue
+
         doc_id_str = _format_doc_id(req)
-        lines.append(f"### {req.id} ({doc_id_str}) — {req.title}")
+        lines.append(f"### {req.id} ({doc_id_str}) — {_short(req.title)}")
         lines.append("")
         status_badge = " · **Статус проверки: не проверено**" if req.check_status == "not_checked" else ""
         lines.append(
             f"- **Раздел:** {req.section} · **Тип:** {req_kind_label(req.kind)}{status_badge}"
         )
-
-        req_findings = sorted(
-            findings_by_req.get(req.id, []),
-            key=lambda f: (SEVERITY_RANK[f.severity], f.id),
-        )
+        if set_refs.get(req.id):
+            lines.append(f"- **Затронуто в наборе:** {', '.join(set_refs[req.id])}")
 
         if req.check_status == "not_checked" and not req_findings:
             lines.append("")
@@ -354,12 +402,6 @@ def _render_per_requirement(report: Report) -> list[str]:
                 "Внимание: полная проверка требования не выполнялась; ниже приведены доступные замечания."
             )
 
-        if not req_findings:
-            lines.append("")
-            lines.append("Нарушений по п. 5.2.5 не выявлено.")
-            lines.append("")
-            continue
-
         major_or_crit = [f for f in req_findings if f.severity in (Severity.CRITICAL, Severity.MAJOR)]
         minors = [f for f in req_findings if f.severity == Severity.MINOR]
 
@@ -372,6 +414,23 @@ def _render_per_requirement(report: Report) -> list[str]:
             for f in minors:
                 lines.append(_render_minor_finding_line(f))
 
+        lines.append("")
+
+    if clean:
+        lines.append("### Требования без собственных нарушений")
+        lines.append("")
+        lines.append(
+            f"Нарушений по п. 5.2.5 ISO/IEC/IEEE 29148 не выявлено у {len(clean)} "
+            f"{'требования' if len(clean) % 10 == 1 and len(clean) % 100 != 11 else 'требований'}: "
+            + ", ".join(r.id for r in clean) + "."
+        )
+        touched = [r for r in clean if set_refs.get(r.id)]
+        if touched:
+            lines.append("")
+            lines.append("Из них затронуты находками проверки набора:")
+            lines.append("")
+            for r in touched:
+                lines.append(f"- {r.id} ({_escape_cell(_short(r.title, 80))}) — {', '.join(set_refs[r.id])}")
         lines.append("")
 
     if orphan_findings:
@@ -508,7 +567,8 @@ def _render_summary(report: Report) -> list[str]:
         "| Показатель | Значение |",
         "| --- | ---: |",
         f"| Всего требований | {summary.requirements_total} |",
-        f"| Требований с нарушениями | {summary.requirements_with_findings} |",
+        f"| Требований с собственными нарушениями | {summary.requirements_with_findings} |",
+        f"| Требований, затронутых только находками набора | {summary.requirements_in_set_findings_only} |",
         f"| Непроверенных требований | {summary.requirements_not_checked} |",
         f"| Всего нарушений | {summary.findings_total} |",
         f"| Вопросов к автору ТЗ | {summary.questions_total} |",
@@ -589,7 +649,7 @@ def _render_summary(report: Report) -> list[str]:
                 finding = finding_by_id.get(fid)
                 if finding is not None:
                     lines.append(
-                        f"  - **{fid}** ({finding.section}) — {_inline_text(finding.explanation)}"
+                        f"  - **{fid}** ({finding.section}) — {_short(_inline_text(finding.explanation), 220)}"
                     )
                 else:
                     lines.append(f"  - **{fid}**")
@@ -617,6 +677,7 @@ def _render_question_block(question: Question) -> list[str]:
     lines = [
         f"#### {question.id}. {question.text}",
         "",
+        f"- **Адресат:** {addressee_label(question.addressee)}",
         f"- **Место:** {place}",
         f"- **Связанные дефекты:** {defects}",
     ]
@@ -727,6 +788,12 @@ def _render_appendix(report: Report) -> list[str]:
             f"- Привязано к тексту требования (`anchored`): {quote_counts.get(QuoteStatus.ANCHORED, 0)}",
             f"- Отброшено находок без подтверждённой цитаты: {report.summary.dropped_unverified_quotes}",
             f"- Отброшено на этапе критического пересмотра: {report.summary.dropped_by_review}",
+            f"- Объединено с другими находками как дубли: {report.summary.merged_duplicates}",
+            "",
+            (
+                "Число кандидатов в статусе этапов складывается так: итоговые нарушения + удалённые критиком "
+                "+ объединённые дубли + отброшенные без цитаты."
+            ),
             "",
             "### Ограничения",
             "",

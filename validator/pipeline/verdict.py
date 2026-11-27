@@ -9,6 +9,7 @@ from validator.models import (
     CoverageRow,
     DefectClass,
     Finding,
+    FindingSource,
     FixItem,
     Question,
     Readiness,
@@ -39,35 +40,66 @@ def _all(findings: list[Finding], set_findings: list[SetFinding]) -> list[AnyFin
     return [*set_findings, *findings]
 
 
+def _question_priority(f: AnyFinding) -> tuple:
+    """Blocking contradictions first, then other critical, then major; template questions last."""
+    if f.severity == Severity.CRITICAL:
+        tier = 0 if f.defect_class == DefectClass.CONTRADICTORY else 1
+    else:
+        tier = 2 + SEVERITY_RANK[f.severity]
+    return (tier, 0 if f.answer_options else 1, 1 if f.source == FindingSource.RULE else 0,
+            0 if isinstance(f, SetFinding) else 1, f.id)
+
+
+def _same_topic(q: Question, f: AnyFinding, q_class: DefectClass) -> bool:
+    """A question covers a finding when the texts match, or they share requirements and the topic."""
+    text = f.clarifying_question.strip()
+    if normalize(text) == normalize(q.text):
+        return True
+    shared = set(q.requirement_ids) & set(f.requirement_ids)
+    if not shared:
+        return False
+    from validator.pipeline.postprocess import stem_set
+
+    wa, wb = stem_set(q.text), stem_set(text)
+    if not (wa and wb):
+        return False
+    jaccard = len(wa & wb) / len(wa | wb)
+    return jaccard >= 0.5 or (jaccard >= 0.35 and q_class == f.defect_class)
+
+
 def build_questions(findings: list[Finding], set_findings: list[SetFinding]) -> list[Question]:
-    items = sorted(_all(findings, set_findings),
-                   key=lambda f: (SEVERITY_RANK[f.severity], 0 if isinstance(f, SetFinding) else 1, f.id))
+    items = sorted(_all(findings, set_findings), key=_question_priority)
     out: list[Question] = []
-    seen: dict[str, Question] = {}
+    classes: dict[str, DefectClass] = {}
     for f in items:
         text = f.clarifying_question.strip()
         if not text:
             continue
-        key = normalize(text)
-        if key in seen:
-            q = seen[key]
+        q = next((x for x in out if _same_topic(x, f, classes[x.id])), None)
+        if q is not None:
             q.finding_ids.append(f.id)
             q.requirement_ids.extend(r for r in f.requirement_ids if r not in q.requirement_ids)
+            if not q.options and f.answer_options:
+                q.options = list(f.answer_options)
             continue
         if len(out) >= MAX_QUESTIONS:
             continue
         q = Question(id=f"Q-{len(out) + 1:03d}", text=text, options=list(f.answer_options), finding_ids=[f.id],
                      requirement_ids=list(f.requirement_ids), section=f.section,
-                     blocking=f.severity == Severity.CRITICAL)
-        seen[key] = q
+                     blocking=f.severity == Severity.CRITICAL, addressee=f.addressee)
+        classes[q.id] = f.defect_class
         out.append(q)
     return out
 
 
 def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],
-                  questions: list[Question], *, dropped_unverified: int, dropped_by_review: int) -> Summary:
+                  questions: list[Question], *, dropped_unverified: int, dropped_by_review: int,
+                  merged: int = 0) -> Summary:
     every = _all(findings, set_findings)
-    with_findings = {r for f in every for r in f.requirement_ids}
+    known = {r.id for r in reqs}
+    # counted the same way the report shows them: own findings vs set-level findings only
+    with_findings = {r for f in findings for r in f.requirement_ids} & known
+    in_sets = {r for f in set_findings for r in f.requirement_ids} & known
     critical = [f for f in every if f.severity == Severity.CRITICAL]
     by_class: dict[str, list[str]] = {}
     for cls in CLASS_ORDER:
@@ -77,7 +109,9 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
     return Summary(
         requirements_total=len(reqs),
         requirements_by_kind=dict(Counter(r.kind.value for r in reqs)),
-        requirements_with_findings=len(with_findings & {r.id for r in reqs}),
+        requirements_with_findings=len(with_findings),
+        requirements_in_set_findings_only=len(in_sets - with_findings),
+        merged_duplicates=merged,
         requirements_not_checked=sum(1 for r in reqs if r.check_status == "not_checked"),
         findings_total=len(every),
         findings_by_severity={s.value: sum(1 for f in every if f.severity == s) for s in Severity},
@@ -90,9 +124,10 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
     )
 
 
-def _short_title(f: AnyFinding, limit: int = 110) -> str:
-    text = f.explanation.split(". ")[0].strip().rstrip(".")
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+def _short_title(f: AnyFinding, limit: int = 120) -> str:
+    from validator.pipeline.postprocess import short_text
+
+    return short_text(f.explanation.split(". ")[0].strip().rstrip("."), limit)
 
 
 def build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],

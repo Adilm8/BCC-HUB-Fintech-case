@@ -136,14 +136,33 @@ class Readiness(StrEnum):
     NO = "no"
 
 
+class Addressee(StrEnum):
+    """Role that can answer a clarifying question."""
+
+    BUSINESS = "business"
+    ANALYST = "analyst"
+    ARCHITECT = "architect"
+    SECURITY = "security"
+    QA = "qa"
+
+
 _CONTRADICTORY_CHECKS = {SetCheck.CONTRADICTION, SetCheck.CROSS_PART, SetCheck.ACCEPTANCE_MISMATCH}
+_INCOMPLETE_CHECKS = {SetCheck.MISSING_REQUIREMENT, SetCheck.MISSING_SCENARIO, SetCheck.EMPTY_SECTION,
+                      SetCheck.ACCEPTANCE_GAP}
 
 
 def defect_class_for(criterion: Criterion | str, set_check: SetCheck | str | None = None) -> DefectClass:
     """Map a criterion (and optional set check) to the organisers' defect classes."""
     c = Criterion(criterion)
-    if set_check is not None and SetCheck(set_check) in _CONTRADICTORY_CHECKS:
-        return DefectClass.CONTRADICTORY
+    if set_check is not None:
+        sc = SetCheck(set_check)
+        if sc in _CONTRADICTORY_CHECKS:
+            return DefectClass.CONTRADICTORY
+        if sc in _INCOMPLETE_CHECKS:
+            return DefectClass.INCOMPLETE
+        if c == Criterion.SET_CONSISTENT:
+            # a consistency criterion without a contradiction check is not a proven contradiction
+            return DefectClass.AMBIGUOUS if sc == SetCheck.TERMINOLOGY else DefectClass.OTHER
     if c in (Criterion.VERIFIABLE, Criterion.SET_VALIDATABLE):
         return DefectClass.UNVERIFIABLE
     if c == Criterion.SET_CONSISTENT:
@@ -242,6 +261,7 @@ class BaseFinding(BaseModel):
     answer_options: list[str] = Field(default_factory=list)
     source: FindingSource
     review_note: str | None = None
+    addressee: Addressee | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -275,6 +295,7 @@ class Question(BaseModel):
     requirement_ids: list[str] = Field(default_factory=list)
     section: str
     blocking: bool
+    addressee: Addressee | None = None
 
 
 class CoverageRow(BaseModel):
@@ -303,6 +324,8 @@ class Summary(BaseModel):
     questions_total: int
     dropped_unverified_quotes: int
     dropped_by_review: int
+    requirements_in_set_findings_only: int = 0  # touched only by set-level findings
+    merged_duplicates: int = 0  # candidates merged into other findings
 
 
 class FixItem(BaseModel):

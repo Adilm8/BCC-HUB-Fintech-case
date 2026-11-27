@@ -13,6 +13,7 @@ ReqCriterionLit = Literal["necessary", "appropriate", "unambiguous", "complete",
                           "verifiable", "correct", "conforming", "traceable", "set_consistent"]
 SetCriterionLit = Literal["set_complete", "set_consistent", "set_feasible", "set_comprehensible",
                           "set_validatable", "ranked", "modifiable", "traceable"]
+AddresseeLit = Literal["business", "analyst", "architect", "security", "qa"]
 SetCheckLit = Literal["contradiction", "cross_part", "acceptance_mismatch", "acceptance_gap", "missing_requirement",
                       "missing_scenario", "empty_section", "terminology", "duplication", "traceability", "other"]
 
@@ -42,6 +43,7 @@ class LLMReqFinding(BaseModel):
     severity: SeverityLit
     recommendation: str
     clarifying_question: str
+    addressee: AddresseeLit = "analyst"  # who can answer the question
     answer_options: list[str]
     related_requirement_ids: list[str]
 
@@ -70,6 +72,7 @@ class LLMSetFinding(BaseModel):
     severity: SeverityLit
     recommendation: str
     clarifying_question: str
+    addressee: AddresseeLit = "analyst"  # who can answer the question
     answer_options: list[str]
 
 

@@ -189,20 +189,21 @@ class Budget:
 class StageCache:
     """On-disk cache of raw model answers keyed by model, prompt and schema."""
 
-    def __init__(self, root: Path | None, *, read: bool = True):
-        self.root = root
-        self.read = read  # with read=False answers are still saved, so a fresh run can be inspected
+    def __init__(self, root: Path | None):
+        self.root = root  # None: no cache at all, neither read nor written
 
     @staticmethod
-    def key(model: str, system: str | None, prompt: str, schema: dict | None) -> str:
+    def key(model: str, system: str | None, prompt: str, schema: dict | None, *, effort: str | None = None,
+            temperature: float | None = None) -> str:
         h = hashlib.sha256()
-        for part in (model, system or "", prompt, json.dumps(schema or {}, sort_keys=True, ensure_ascii=False)):
+        for part in (model, effort or "", "" if temperature is None else f"{temperature:.2f}", system or "", prompt,
+                     json.dumps(schema or {}, sort_keys=True, ensure_ascii=False)):
             h.update(part.encode("utf-8"))
             h.update(b"\x00")
         return h.hexdigest()
 
     def get(self, key: str) -> dict | None:
-        if self.root is None or not self.read:
+        if self.root is None:
             return None
         path = self.root / f"{key}.json"
         try:
@@ -273,7 +274,7 @@ def call_structured(
     """One structured call with local repair and at most one corrective retry."""
     schema = provider_schema(model_cls)
     model_name = getattr(client, "model", "") or ""
-    key = StageCache.key(model_name, system, prompt, schema)
+    key = StageCache.key(model_name, system, prompt, schema, effort=effort, temperature=temperature)
     hit = cache.get(key)
     if hit is not None:
         obj, dropped = validate_lenient(model_cls, hit.get("data"))
@@ -298,7 +299,8 @@ def call_structured(
             if obj is None:
                 raise ValueError("ответ не соответствует схеме")
             result = StructuredResult(obj, responses, dropped, resp.truncated, repaired or resp.truncated)
-            if not resp.truncated:
+            # an answer from a fallback model is not stored under the primary model's key
+            if not resp.truncated and (not model_name or resp.model == model_name):
                 cache.put(key, {"data": obj.model_dump(mode="json"), "model": resp.model, "truncated": False})
             return result
         except ValueError as exc:

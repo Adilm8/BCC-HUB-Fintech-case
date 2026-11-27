@@ -454,3 +454,17 @@ def set_check_label(set_check: SetCheck | str) -> str:
         return SET_CHECK_LABELS[SetCheck(set_check)]
     except ValueError:
         return str(set_check)
+
+
+ADDRESSEE_LABELS: dict[str, str] = {
+    "business": "Бизнес / Product Owner",
+    "analyst": "Системный аналитик / API",
+    "architect": "Архитектор / интеграции",
+    "security": "Информационная безопасность",
+    "qa": "QA",
+}
+
+
+def addressee_label(addressee: object) -> str:
+    key = getattr(addressee, "value", addressee)
+    return ADDRESSEE_LABELS.get(str(key), "Автор ТЗ") if key else "Автор ТЗ"

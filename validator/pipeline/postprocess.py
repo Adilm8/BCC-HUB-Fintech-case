@@ -45,6 +45,21 @@ GENERIC_PATTERNS = [
 ]
 _ROW_SKIP_KINDS = {BlockKind.HEADING, BlockKind.TABLE_HEADER}
 _BLOCK_ID = re.compile(r"\bB\d{3,4}\b")
+_CAND_ID = re.compile(r"\b(?:см\.?\s+)?C\d{2,3}\b", re.IGNORECASE)
+_DUPLICATE_NOTE = re.compile(r"(дублир\w*|уже уч[её]т\w*|не добавля\w*)", re.IGNORECASE)
+_HTTP_CODE = re.compile(r"\b[1-5]\d\d\b")
+
+
+def short_text(text: str, limit: int = 120) -> str:
+    """Cut at a word boundary and mark the cut with an ellipsis."""
+    t = " ".join((text or "").split())
+    if len(t) <= limit:
+        return t
+    cut = t[: limit - 1]
+    space = cut.rfind(" ")
+    if space >= limit // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,.;:—-") + "…"
 
 
 def section_label(path: list[str], doc_title: str = "") -> str:
@@ -94,7 +109,7 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
             raw.append((index.block_order(bids[0]), Requirement(
                 id="", doc_id=doc_id, id_assigned=doc_id is None, kind=ReqKind(item.kind),
                 part=first.part, section=section_label(first.section_path, doc.title), block_ids=bids,
-                title=(item.title.strip() or text)[:160], quote=quote, source="llm",
+                title=short_text(item.title.strip() or text), quote=quote, source="llm",
             )))
             used.update(bids)
             # requirements whose blocks were also marked skipped stay requirements
@@ -107,7 +122,7 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
             continue
         raw.append((index.block_order(b.id), Requirement(
             id="", doc_id=b.doc_id, id_assigned=b.doc_id is None, kind=ReqKind.OTHER, part=b.part,
-            section=section_label(b.section_path, doc.title), block_ids=[b.id], title=b.text[:160], quote=b.text,
+            section=section_label(b.section_path, doc.title), block_ids=[b.id], title=short_text(b.text), quote=b.text,
             source="rule",
         )))
         added += 1
@@ -154,6 +169,10 @@ class Candidate:
     confirmed: bool = False
     final_id: str = ""
     merged_from: list[str] = field(default_factory=list)
+    addressee: str = ""
+    protected: bool = False  # severity fixed by a deterministic rule: the critic may not lower or drop it
+    no_merge: bool = False  # aggregated findings keep their own requirement list
+    gist_added: int = 0
 
     @property
     def is_set(self) -> bool:
@@ -240,6 +259,7 @@ class CandidateBuilder:
             return rid or ""
 
         out = _BLOCK_ID.sub(repl, text or "")
+        out = _CAND_ID.sub("", out)
         out = re.sub(r"\(\s*[,;]?\s*\)", "", out)
         out = re.sub(r"\s{2,}", " ", out)
         return out.replace(" ,", ",").replace(" .", ".").strip()
@@ -302,15 +322,16 @@ class CandidateBuilder:
                 if crit == Criterion.SET_CONSISTENT and related:
                     evidence = [ev] + [self.requirement_evidence(r) for r in related[:2]]
                     out.append(Candidate(crit, sev, evidence, f.explanation.strip(), f.recommendation.strip(),
-                                         self._question(f.clarifying_question), f.answer_options[:4],
+                                         self._question(f.clarifying_question), distinct_options(f.answer_options),
                                          [frid, *related], FindingSource.LLM, set_check=SetCheck.CONTRADICTION,
-                                         needs_confirmation=needs_conf))
+                                         needs_confirmation=needs_conf, addressee=f.addressee))
                     continue
                 if crit == Criterion.SET_CONSISTENT:
                     crit = Criterion.CORRECT
                 out.append(Candidate(crit, sev, [ev], f.explanation.strip(), f.recommendation.strip(),
-                                     self._question(f.clarifying_question), f.answer_options[:4], [frid],
-                                     FindingSource.LLM, needs_confirmation=needs_conf))
+                                     self._question(f.clarifying_question), distinct_options(f.answer_options),
+                                     [frid], FindingSource.LLM, needs_confirmation=needs_conf,
+                                     addressee=f.addressee))
         return out, seen
 
     def from_set(self, findings: list[LLMSetFinding], source: FindingSource = FindingSource.LLM) -> list[Candidate]:
@@ -351,8 +372,8 @@ class CandidateBuilder:
             if cross and check == SetCheck.CONTRADICTION:
                 check = SetCheck.CROSS_PART
             c = Candidate(crit, sev, evidence, explanation, f.recommendation.strip(),
-                          self._question(f.clarifying_question), f.answer_options[:4], req_ids, source,
-                          set_check=check, scenario=f.scenario.strip())
+                          self._question(f.clarifying_question), distinct_options(f.answer_options), req_ids,
+                          source, set_check=check, scenario=f.scenario.strip(), addressee=f.addressee)
             out.append(c)
         return out
 
@@ -385,7 +406,8 @@ class CandidateBuilder:
                 check = SetCheck.OTHER
             out.append(Candidate(f.criterion, f.severity, [m_ev], f.explanation, f.recommendation,
                                  self._question(f.clarifying_question), [], rids, FindingSource.RULE,
-                                 set_check=check))
+                                 set_check=check,
+                                 protected=f.severity == Severity.CRITICAL))
         return out
 
 
@@ -400,13 +422,38 @@ def clean_texts(cands: list[Candidate], builder: CandidateBuilder) -> None:
         c.options = [builder.clean_text(o) for o in c.options]
 
 
-def apply_guards(cands: list[Candidate]) -> None:
+def distinct_options(options: list[str], limit: int = 4) -> list[str]:
+    """Answer options that actually differ; fewer than two distinct options are no choice at all."""
+    out: list[str] = []
+    for o in options:
+        o = (o or "").strip()
+        if o and all(normalize(o) != normalize(x) and not quotes_overlap(o, x, 0.85) for x in out):
+            out.append(o)
+    return out[:limit] if len(out) >= 2 else []
+
+
+def _status_code_conflict(c: Candidate, parts: dict[str, str]) -> bool:
+    """Two verified places of one document part prescribe different HTTP status codes."""
+    if c.set_check not in CONTRADICTION_CHECKS:
+        return False
+    verified = [e for e in c.evidence if e.quote_status != QuoteStatus.ANCHORED]
+    coded = [frozenset(_HTTP_CODE.findall(e.quote)) for e in verified]
+    coded = [s for s in coded if s]
+    if len(coded) < 2 or len(set(coded)) < 2:
+        return False
+    owners = {parts.get(b, "") for e in verified for b in e.block_ids}
+    return len(owners) == 1
+
+
+def apply_guards(cands: list[Candidate], parts: dict[str, str] | None = None) -> None:
     for c in cands:
         if c.criterion in MINOR_ONLY:
             c.severity = Severity.MINOR
         anchored = all(e.quote_status == QuoteStatus.ANCHORED for e in c.evidence)
         if anchored and c.severity == Severity.CRITICAL:
             c.severity = Severity.MAJOR
+        if parts is not None and not anchored and _status_code_conflict(c, parts):
+            c.severity = Severity.CRITICAL
 
 
 def _crit_rank(c: Criterion) -> int:
@@ -430,15 +477,50 @@ def _related_explanations(a: Candidate, b: Candidate) -> bool:
     """Two findings on overlapping quotes merge only when they talk about the same thing."""
     if a.criterion == b.criterion and not (a.is_set and b.is_set):
         return True
-    wa, wb = word_set(a.explanation), word_set(b.explanation)
+    # set findings compare by stems (inflected forms); anything involving a requirement finding stays strict
+    sets = a.is_set and b.is_set
+    wa = stem_set(a.explanation) if sets else word_set(a.explanation)
+    wb = stem_set(b.explanation) if sets else word_set(b.explanation)
     if not wa or not wb:
         return False
-    return len(wa & wb) / min(len(wa), len(wb)) >= 0.35
+    return len(wa & wb) / min(len(wa), len(wb)) >= (0.35 if sets else 0.45)
+
+
+def stem_set(text: str) -> set[str]:
+    """Crude stems (word prefixes) so that inflected Russian forms compare equal."""
+    return {w[:5] for w in word_set(text) if len(w) > 3}
+
+
+def _set_overlap(a: Candidate, b: Candidate) -> bool:
+    """Two set findings quoting mostly the same blocks describe one defect."""
+    if not (a.is_set and b.is_set) or a.no_merge or b.no_merge:
+        return False
+    if a.two_quote_contradiction and b.two_quote_contradiction:
+        return False  # distinct contradictions may share a place; quote overlap decides for them
+    inter = a.block_ids & b.block_ids
+    small = min(len(a.block_ids), len(b.block_ids)) or 1
+    return len(inter) >= 2 and len(inter) / small >= 0.5
+
+
+def _first_sentence(text: str, limit: int = 220) -> str:
+    s = re.split(r"(?<=[.!?])\s+", (text or "").strip(), maxsplit=1)[0]
+    return short_text(s, limit)
 
 
 def merge_into(winner: Candidate, loser: Candidate) -> None:
     if SEVERITY_RANK[loser.severity] < SEVERITY_RANK[winner.severity]:
         winner.severity = loser.severity
+    # keep the gist of a merged finding that says something different
+    wa, wb = word_set(winner.explanation), word_set(loser.explanation)
+    if wb and winner.gist_added < 2 and len(wa & wb) / len(wb) < 0.5 and not _DUPLICATE_NOTE.search(
+            loser.explanation):
+        gist = _first_sentence(loser.explanation)
+        if gist and normalize(gist) not in normalize(winner.explanation):
+            winner.explanation = winner.explanation.rstrip() + " Также: " + gist
+            winner.gist_added += 1
+    winner.protected = winner.protected or loser.protected
+    if not winner.addressee:
+        winner.addressee = loser.addressee
     for e in loser.evidence:
         if not any(normalize(e.quote) == normalize(x.quote) for x in winner.evidence):
             winner.evidence.append(e)
@@ -462,7 +544,9 @@ def dedup(cands: list[Candidate], stats: Stats) -> list[Candidate]:
     ordered = sorted(cands, key=_priority)
     kept: list[Candidate] = []
     for c in ordered:
-        target = next((k for k in kept if _same_place(k, c) and _related_explanations(k, c)), None)
+        target = next((k for k in kept if not (k.no_merge or c.no_merge) and (
+            (_same_place(k, c) and _related_explanations(k, c)) or (_set_overlap(k, c) and _related_explanations(k, c))
+        )), None)
         if target is None:
             kept.append(c)
             continue
@@ -512,10 +596,14 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
         if c is None or c.cid in dropped:
             continue
         verdict = d.verdict
+        lowers = SEVERITY_RANK[Severity(d.severity)] > SEVERITY_RANK[c.severity]
+        if c.protected and (verdict != "keep" or lowers):
+            c.confirmed = True  # a rule-fixed critical gap is neither dropped nor lowered by the critic
+            continue
         if verdict == "keep":
             c.confirmed = True
             new_sev = Severity(d.severity)
-            if not (c.two_quote_contradiction and SEVERITY_RANK[new_sev] > SEVERITY_RANK[c.severity]):
+            if not (c.two_quote_contradiction and lowers):
                 c.severity = new_sev
         elif verdict in ("merge",) or d.drop_reason == "duplicate":
             target = by_id.get(d.merge_into.strip())
@@ -549,7 +637,7 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                     c.confirmed = True
                     continue
                 anchored = all(e.quote_status == QuoteStatus.ANCHORED for e in c.evidence)
-                if c.severity != Severity.MINOR and not anchored:
+                if c.severity != Severity.MINOR and not anchored and c.source != FindingSource.RULE:
                     # a verified major finding is not removed without proof: it stays as minor
                     c.severity = Severity.MINOR
                     c.confirmed = True
@@ -562,7 +650,10 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
         if d.improved_question.strip() and c.cid not in dropped:
             c.question = CandidateBuilder._question(d.improved_question)
     kept = [c for c in cands if c.cid not in dropped]
-    missed = builder.from_set(review.missed[:5], FindingSource.REVIEW)
+    # the critic adds only critical defects, never notes about duplicates
+    missed = [m for m in builder.from_set(review.missed[:5], FindingSource.REVIEW)
+              if m.severity == Severity.CRITICAL and not _DUPLICATE_NOTE.search(m.explanation)
+              and not _CAND_ID.search(m.explanation + m.recommendation)]
     for m in missed:
         m.confirmed = True
     fix = [x.strip() for x in review.fix_first if x.strip() in by_id and x.strip() not in dropped]
@@ -584,6 +675,28 @@ def drop_unconfirmed_anchored(cands: list[Candidate], reviewed: bool, stats: Sta
 
 
 MAX_EVIDENCE = 4
+ADDRESSEES = {"business", "analyst", "architect", "security", "qa"}
+_SECURITY_WORDS = re.compile(r"(безопасн|персональн|маскир|токен|утечк|журнал\w* .*карт|ИБ\b|шифров)", re.IGNORECASE)
+
+
+def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
+    if c.addressee in ADDRESSEES:
+        return c.addressee
+    text = f"{c.explanation} {c.question}"
+    if _SECURITY_WORDS.search(text):
+        return "security"
+    if c.set_check in (SetCheck.ACCEPTANCE_GAP, SetCheck.ACCEPTANCE_MISMATCH, SetCheck.MISSING_SCENARIO):
+        return "qa"
+    kinds = {reqs[r].kind for r in c.requirement_ids if r in reqs}
+    if kinds & {ReqKind.INTERFACE, ReqKind.DATA}:
+        return "analyst"
+    if kinds & {ReqKind.INTEGRATION, ReqKind.NONFUNCTIONAL}:
+        return "architect"
+    if kinds & {ReqKind.ACCEPTANCE_CRITERION}:
+        return "qa"
+    if kinds & {ReqKind.BUSINESS_GOAL, ReqKind.PROCESS, ReqKind.UI, ReqKind.FUNCTIONAL}:
+        return "business"
+    return "analyst"
 
 
 def compact_evidence(evidence: list[Evidence], limit: int = MAX_EVIDENCE) -> list[Evidence]:
@@ -616,8 +729,11 @@ def compact_evidence(evidence: list[Evidence], limit: int = MAX_EVIDENCE) -> lis
 
 def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Finding], list[SetFinding]]:
     order = {r.id: i for i, r in enumerate(reqs)}
+    req_map = {r.id: r for r in reqs}
     for c in cands:
         c.evidence = compact_evidence(c.evidence)
+        c.addressee = infer_addressee(c, req_map)
+        c.options = distinct_options(c.options)
 
     def req_pos(c: Candidate) -> int:
         return min((order.get(r, 10**6) for r in c.requirement_ids), default=10**6)
@@ -635,7 +751,7 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             id=c.final_id, criterion=c.criterion, severity=c.severity, defect_class=defect_class_for(c.criterion),
             evidence=c.evidence, explanation=c.explanation, recommendation=c.recommendation,
             clarifying_question=c.question, answer_options=c.options, source=c.source, review_note=c.review_note,
-            requirement_ids=c.requirement_ids,
+            requirement_ids=c.requirement_ids, addressee=c.addressee,
         ))
     for i, c in enumerate(sets, 1):
         c.final_id = f"S-{i:03d}"
@@ -646,7 +762,7 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             defect_class=defect_class_for(c.criterion, check), evidence=c.evidence, explanation=c.explanation,
             recommendation=c.recommendation, clarifying_question=c.question, answer_options=c.options,
             source=c.source, review_note=c.review_note, set_check=check, requirement_ids=c.requirement_ids,
-            cross_part=check == SetCheck.CROSS_PART or len(parts) > 1 and check in CONTRADICTION_CHECKS,
+            cross_part=check == SetCheck.CROSS_PART or len(parts) > 1, addressee=c.addressee,
         ))
     return findings, set_findings
 

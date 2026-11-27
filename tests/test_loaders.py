@@ -1,3 +1,4 @@
+import codecs
 from pathlib import Path
 
 import docx
@@ -70,10 +71,15 @@ def test_rejects_empty_bad_encoding_no_ext_and_directory(tmp_path):
     with pytest.raises(ValueError, match="нет текста"):
         load_document(empty_md)
 
-    bad_utf8 = tmp_path / "broken.txt"
-    bad_utf8.write_bytes(b"\xff\xfe\xfa\xfb")
+    bad_encoding = tmp_path / "broken.txt"
+    bad_encoding.write_bytes(b"\x98\x98\xff\x00")
     with pytest.raises(ValueError, match="UTF-8"):
-        load_document(bad_utf8)
+        load_document(bad_encoding)
+
+    broken_utf16 = tmp_path / "broken_utf16.txt"
+    broken_utf16.write_bytes(b"\xff\xfe\x41")
+    with pytest.raises(ValueError, match="UTF-16"):
+        load_document(broken_utf16)
 
     no_ext = tmp_path / "README"
     no_ext.write_text("content", encoding="utf-8")
@@ -82,6 +88,31 @@ def test_rejects_empty_bad_encoding_no_ext_and_directory(tmp_path):
 
     with pytest.raises(ValueError, match="каталог"):
         load_document(tmp_path)
+
+
+def test_loads_txt_and_md_in_utf16_and_cp1251_with_warnings(tmp_path):
+    utf16_le = tmp_path / "spec_le.txt"
+    utf16_le.write_bytes("# Требования\r\nСистема хранит заявки.".encode("utf-16"))
+    raw_le = load_document(utf16_le)
+    assert raw_le.format == "txt"
+    assert raw_le.title == "Требования"
+    assert "Система хранит заявки." in raw_le.text
+    assert any("UTF-16" in w for w in raw_le.warnings)
+
+    utf16_be = tmp_path / "spec_be.md"
+    utf16_be.write_bytes(codecs.BOM_UTF16_BE + "# Заголовок\nТекст в UTF-16 BE.".encode("utf-16-be"))
+    raw_be = load_document(utf16_be)
+    assert raw_be.format == "md"
+    assert "Текст в UTF-16 BE." in raw_be.text
+    assert any("UTF-16" in w for w in raw_be.warnings)
+
+    cp1251_txt = tmp_path / "ansi.txt"
+    cp1251_txt.write_bytes("# Общие требования\r\nПорог задаётся в «рублях» — целое число.".encode("cp1251"))
+    raw_cp = load_document(cp1251_txt)
+    assert raw_cp.format == "txt"
+    assert raw_cp.title == "Общие требования"
+    assert "«рублях»" in raw_cp.text
+    assert any("cp1251" in w for w in raw_cp.warnings)
 
 
 def test_docx_headings_lists_and_tables_order(tmp_path):
@@ -113,6 +144,47 @@ def test_docx_headings_lists_and_tables_order(tmp_path):
     assert "| A / B | Строка 1 Строка 2 |" in raw.text
     assert raw.text.index("Вводный абзац.") < raw.text.index("- Пункт списка один")
     assert raw.text.index("2. Шаг второй") < raw.text.index("| A / B |")
+
+
+def test_docx_nested_tables_and_merged_cells(tmp_path):
+    d = docx.Document()
+    d.add_heading("Требования", level=1)
+    tbl = d.add_table(rows=4, cols=3)
+    tbl.cell(0, 0).text = "Раздел"
+    tbl.cell(0, 1).text = "Описание"
+    tbl.cell(0, 2).text = "Примечание"
+
+    # Horizontally merged row spanning all 3 columns.
+    merged = tbl.cell(1, 0).merge(tbl.cell(1, 2))
+    merged.text = "Общая строка"
+
+    # Row with a nested table inside one cell.
+    tbl.cell(2, 0).text = "Безопасность"
+    parent_cell = tbl.cell(2, 1)
+    parent_cell.text = "Основные меры"
+    nested = parent_cell.add_table(rows=2, cols=2)
+    nested.cell(0, 0).text = "REQ-1.1"
+    nested.cell(0, 1).text = "Шифрование данных"
+    nested.cell(1, 0).text = "REQ-1.2"
+    nested.cell(1, 1).text = "Срок хранения 5 лет"
+    tbl.cell(2, 2).text = "Обязательно"
+
+    # Separate identical cells (NOT merged) must stay distinct.
+    tbl.cell(3, 0).text = "Проверка"
+    tbl.cell(3, 1).text = "Да / Нет"
+    tbl.cell(3, 2).text = "Да / Нет"
+
+    path = tmp_path / "nested_merged.docx"
+    d.save(path)
+
+    raw = load_document(path)
+    assert "| Общая строка |" in raw.text
+    assert "| Общая строка | Общая строка |" not in raw.text
+    assert "| REQ-1.1 | Шифрование данных |" in raw.text
+    assert "| REQ-1.2 | Срок хранения 5 лет |" in raw.text
+    assert "| Проверка | Да / Нет | Да / Нет |" in raw.text
+    assert raw.text.index("Основные меры") < raw.text.index("REQ-1.1") < raw.text.index("Проверка")
+    assert any("вложенные таблицы" in w for w in raw.warnings)
 
 
 def test_rejects_corrupted_and_empty_docx(tmp_path):
@@ -238,7 +310,7 @@ def test_pdf_without_headings_and_with_images_warnings(tmp_path):
     assert any("изображения" in w for w in raw_img.warnings)
 
 
-def test_pdf_scanned_or_corrupted_raises_russian_value_error(tmp_path):
+def test_pdf_scanned_or_corrupted_raises_russian_value_error(tmp_path, capsys):
     scanned = tmp_path / "scan.pdf"
     scanned.write_bytes(build_minimal_pdf_bytes([[]], include_image_xobject=True))
     with pytest.raises(ValueError, match="скан"):
@@ -248,6 +320,9 @@ def test_pdf_scanned_or_corrupted_raises_russian_value_error(tmp_path):
     corrupted.write_bytes(b"%PDF-broken-garbage")
     with pytest.raises(ValueError, match="PDF"):
         load_document(corrupted)
+    captured = capsys.readouterr()
+    assert "invalid pdf header" not in captured.err.lower()
+    assert "eof marker" not in captured.err.lower()
 
 
 def test_loads_pdf_fixture():

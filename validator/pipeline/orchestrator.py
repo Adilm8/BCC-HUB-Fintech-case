@@ -195,7 +195,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     client = client or make_client(settings)
     budget = Budget(profile.max_calls)
-    cache = StageCache(Path(settings.cache_dir), read=settings.cache_enabled)
+    cache = StageCache(Path(settings.cache_dir) if settings.cache_enabled else None)
     deadline = time.monotonic() + settings.run_deadline_seconds
     ctx = StageContext(client=client, settings=settings, budget=budget, cache=cache, deadline=deadline)
     index = QuoteIndex(doc)
@@ -355,7 +355,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     candidates.extend(_aggregate_gaps(builder, coverage, candidates))
     pp.clean_texts(candidates, builder)
-    pp.apply_guards(candidates)
+    parts = {b.id: b.part for b in doc.blocks}
+    pp.apply_guards(candidates, parts)
     candidates = pp.dedup(candidates, stats)
     pp.assign_candidate_ids(candidates)
 
@@ -379,10 +380,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             candidates, outcome = pp.apply_review(candidates, review, builder, stats)
             reviewed = True
             pp.clean_texts(candidates, builder)
-            pp.apply_guards(candidates)  # the critic may not lift capped criteria
+            pp.apply_guards(candidates, parts)  # the critic may not lift capped criteria
             if outcome.missed:
                 pp.clean_texts(outcome.missed, builder)
-                pp.apply_guards(outcome.missed)
+                pp.apply_guards(outcome.missed, parts)
                 candidates = pp.dedup(candidates + outcome.missed, stats)
             fix_order = outcome.fix_first
             rationale = outcome.rationale
@@ -402,7 +403,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     critic_order = [by_cid[x] for x in fix_order if x in by_cid]
     reqs = [r.model_copy(update={"check_status": "checked" if r.id in checked else "not_checked"}) for r in reqs]
     questions = build_questions(findings, set_findings)
-    summary = build_summary(reqs, findings, set_findings, questions,
+    summary = build_summary(reqs, findings, set_findings, questions, merged=stats.merged,
                             dropped_unverified=stats.dropped_unverified_quotes,
                             dropped_by_review=stats.dropped_by_review)
     verdict = build_verdict(reqs, findings, set_findings, coverage, critic_order=critic_order, rationale=rationale)
@@ -448,7 +449,8 @@ def _coverage(builder: pp.CandidateBuilder, data: LLMSetCheck, reqs: list[Requir
     rows: dict[str, CoverageRow] = {}
     for c in data.coverage:
         rid = builder.resolve_req(c.requirement_id)
-        if rid is None or rid in rows or kinds.get(rid) == ReqKind.ACCEPTANCE_CRITERION:
+        # interface details (parameters, examples) are covered through the operation, not row by row
+        if rid is None or rid in rows or kinds.get(rid) in (ReqKind.ACCEPTANCE_CRITERION, ReqKind.INTERFACE):
             continue
         acc = [a for a in (builder.resolve_req(x) for x in c.acceptance_ids)
                if a and kinds.get(a) == ReqKind.ACCEPTANCE_CRITERION]
@@ -482,8 +484,10 @@ def _aggregate_gaps(builder: pp.CandidateBuilder, coverage: list[CoverageRow],
                     "нельзя принять по согласованным сценариям.",
         recommendation="Добавить критерии приёмки с исходными условиями, действием и ожидаемым результатом "
                        "для каждого из перечисленных требований.",
-        question=f"Какие сценарии приёмки подтверждают выполнение требований {ids}?", options=[],
+        question="Какие сценарии приёмки подтверждают выполнение перечисленных требований?",
+        options=["Критерии приёмки будут добавлены в документ", "Сценарии будут описаны в тест-кейсах QA"],
         requirement_ids=rest, source=FindingSource.RULE, set_check=SetCheck.ACCEPTANCE_GAP, confirmed=True,
+        no_merge=True, addressee="qa",
     )]
 
 

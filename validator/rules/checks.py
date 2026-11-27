@@ -606,8 +606,13 @@ def _check_placeholders_and_empty_cells(
             placeholder_hit: str | None = None
             empty_cols: list[str] = []
 
+            # A bare dash in a per-field table (more than two columns: parameter, type, mapping...) means
+            # "not applicable" for that column; only key-value tables (two columns) hold placeholder values.
+            per_field_table = len(cells) > 2
             for idx, cell in enumerate(cells):
                 stripped = cell.strip()
+                if per_field_table and stripped and _BARE_DASH_RE.match(stripped):
+                    continue
                 if not stripped:
                     col_name = (
                         headers[idx]
@@ -1414,6 +1419,9 @@ def extract_image_warnings(doc: Document) -> list[str]:
             "содержимое изображений и диаграмм не анализировалось."
         )
     ]
+
+
+_BARE_DASH_RE = re.compile(r"^[—–-]{1,3}$")
 
 
 def _check_image_link_hints(doc: Document) -> list[Hint]:
