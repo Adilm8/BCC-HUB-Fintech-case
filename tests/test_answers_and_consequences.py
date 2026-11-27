@@ -1,4 +1,4 @@
-"""Offline tests for Feature 1 (option consequences) and Feature 2 (answers loop)."""
+"""Offline tests for option consequences and the answers loop."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def _assert_tables_balanced(markdown: str) -> None:
             expected = None
 
 
-# ---------------------------------------------------------------- Feature 1: option consequences
+# ---------------------------------------------------------------- option consequences
 
 
 def test_llm_option_consequences_propagate_to_findings_questions_and_markdown():
@@ -216,7 +216,7 @@ def test_backward_compatible_sample_report_and_app_js_renders_consequences_safel
     assert "innerHTML" not in app_js and "outerHTML" not in app_js and "insertAdjacentHTML" not in app_js
 
 
-# ---------------------------------------------------------------- Feature 2: YAML template & answers loop
+# ---------------------------------------------------------------- YAML template & answers loop
 
 
 def test_questions_template_cli_and_yaml_parser_roundtrip(tmp_path, monkeypatch, capsys):

@@ -36,7 +36,7 @@ _EXTRA = None
 
 
 def extra_provider_module():
-    """Optional extra provider for local testing: a Python file named by VALIDATOR_EXTRA_PROVIDER.
+    """Optional extra provider: a Python file named by VALIDATOR_EXTRA_PROVIDER.
 
     The module defines NAME, CONFIG (key, model, default model, fallback variables), FAMILY, TIMEOUT, DEADLINE and
     make_client(settings). Nothing is loaded when the variable is not set."""

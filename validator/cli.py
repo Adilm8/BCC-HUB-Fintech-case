@@ -87,7 +87,8 @@ def _main(argv: list[str] | None) -> int:
     parser.add_argument("--replay", type=Path, default=None, metavar="DIR",
                         help="повторить прогон по записанной трассе: без ключа и без сети")
     parser.add_argument("--domain", default=None, metavar="NAME|auto|none",
-                        help="доменный чек-лист из validator/domains (по умолчанию DOMAIN_PROFILE или none)")
+                        help="доменный чек-лист из validator/domains (по умолчанию DOMAIN_PROFILE, иначе auto: "
+                             "выбор по ключевым словам документа)")
     parser.add_argument("--rules-only", action="store_true",
                         help="проверить только правилами, без модели (ключ не нужен; итог не определён)")
     parser.add_argument("--questions-template", nargs=2, type=Path, metavar=("REPORT_JSON", "ANSWERS_YAML"),

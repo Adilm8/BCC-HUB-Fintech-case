@@ -1,4 +1,4 @@
-"""Experimental deterministic rules (each behind its own switch in validator/rules/__init__.py).
+"""Optional deterministic rules, off by default (each behind its own switch in validator/rules/__init__.py).
 
 non_singular                one requirement item bundles three or more independent rules
 undefined_term              an abbreviation or code used in requirements is defined nowhere in the document

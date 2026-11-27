@@ -1,4 +1,4 @@
-"""Reliability on the jury's machine: quota vs rate limit, network outage, schemas, CLI paths."""
+"""Reliability on a clean machine: quota vs rate limit, network outage, schemas, CLI paths."""
 
 import time
 

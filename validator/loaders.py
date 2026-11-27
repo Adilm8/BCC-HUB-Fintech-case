@@ -16,7 +16,7 @@ from typing import Literal
 
 from validator.models import RawDocument
 
-# Legacy alias kept until older pipeline scaffold switches its type annotation to RawDocument.
+# Alias: a loaded document is a RawDocument.
 Document = RawDocument
 
 SUPPORTED = ".md, .txt, .pdf, .docx"
