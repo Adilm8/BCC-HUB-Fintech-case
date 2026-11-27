@@ -10,8 +10,9 @@
 | --- | --- | --- | --- | --- |
 | [`reports/report.md`](reports/report.md) — основной | Anthropic `claude-sonnet-5-5`, глубина рассуждения `high` (`LLM_EFFORT=high`) | 23.5 из 27 (лучший из 2 прогонов; второй — 22.5) | 7 из 7 | 6 / ~6 мин, ~$1.0 |
 | [`reports/gemini/report.md`](reports/gemini/report.md) — то, что воспроизведёт жюри | Google `gemini-3.5-flash` на бесплатном ключе (часть вызовов ушла на запасную `gemini-3.5-flash-lite`) | 19.5 из 27 | 7 из 7 | 6 / ~7 мин, бесплатно |
+| [`reports/gemini-3.8-flash/report.md`](reports/gemini-3.8-flash/report.md) | Google `gemini-3.8-flash` через OpenRouter (`LLM_PROVIDER=openrouter`), глубина `high`, `LLM_MAX_OUTPUT_TOKENS=64000` | 21 из 27 | 7 из 7 | 6 / ~20 мин, ~$0.87 |
 
-  \* Оценка LLM-судьёй по нашему эталону из 27 дефектов (`gemini-3.8-flash` сравнивает находки с эталоном по смыслу). Оба отчёта пересобираются **без ключа и сети** из сохранённых ответов модели: `python -m validator docs/requirements.md out.md --replay reports/trace` (или `reports/gemini/trace`).
+  \* Оценка LLM-судьёй по нашему эталону из 27 дефектов (`gemini-3.8-flash` сравнивает находки с эталоном по смыслу). Все отчёты пересобираются **без ключа и сети** из сохранённых ответов модели: `python -m validator docs/requirements.md out.md --replay reports/trace` (или `reports/gemini/trace`, `reports/gemini-3.8-flash/trace`). Через API Google `gemini-3.8-flash` в день сдачи отвечал «перегружено», поэтому для неё использован OpenRouter.
 - **Пример уточнения «было → стало»:** [`examples/clarification/after.md`](examples/clarification/after.md) — ответы автора на 20 вопросов ([`answers.yaml`](examples/clarification/answers.yaml)) закрыли 15 нарушений; открытых стало 27 вместо 38, критичных 0 вместо 7.
 - **Запуск одной командой** (Python 3.11+, ключ Google AI Studio: https://aistudio.google.com/apikey):
 
