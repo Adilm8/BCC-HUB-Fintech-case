@@ -85,18 +85,6 @@ ledger верни пустым списком. Не больше 12 находо
 согласованные с функциональными правилами; описание одной строкой без них — пробел (missing_requirement);
 - документ: версия, приоритеты требований, согласование, откат."""
 
-PAIRS_TASK = """Задание S1b: проверь попарно правила, которые ограничивают одно и то же событие или величину.
-Шаг 1: в ledger выпиши каждое такое событие или величину (concept) и в mentions — все правила, которые его \
-ограничивают: лимиты частоты за период, сброс или исключение при изменении настройки или состояния, пороги и \
-условия перехода, временная база, исключения из учёта.
-Шаг 2: для КАЖДОЙ пары правил одного события составь конкретный сценарий: событие уже произошло в периоде → \
-изменили настройку или состояние → условие наступает снова в том же периоде. Что требует первое правило, что \
-второе? Если результаты различаются — находка contradiction (criterion set_consistent, обычно critical) с двумя \
-цитатами и сценарием в scenario. Если правило не говорит, что делать в этой ситуации, — missing_scenario \
-(criterion set_complete, major).
-Не повторяй дефекты интерфейса (методы, коды ответов): их проверяют другие этапы. coverage верни пустым \
-списком. Не больше 6 находок."""
-
 MERGED_TASK = """Выполни оба задания в одном ответе: сначала S1, затем S2. Общий лимит — 16 находок."""
 
 AUTHOR_ANSWERS_NOTE = (
@@ -116,27 +104,17 @@ def _common(doc: Document, reqs: list[Requirement], include_document: bool) -> l
 
 
 def build_s1_prompt(doc: Document, reqs: list[Requirement], inventory: list[InventoryItem], *,
-                    include_document: bool = True, merged_with_s2: str | None = None, pairs: str = "",
-                    second_pass: bool = False, task: str | None = None, author_answers: str = "") -> str:
-    parts = _common(doc, list(reversed(reqs)) if second_pass else reqs, include_document)
+                    include_document: bool = True, merged_with_s2: str | None = None,
+                    author_answers: str = "") -> str:
+    parts = _common(doc, reqs, include_document)
     parts.append("<parts>\n" + "\n".join(f"- {p}" for p in doc.parts) + "\n</parts>" if doc.parts else
                  "<parts>документ из одной части</parts>")
     if inventory:
         parts.append("<inventory>\n" + inventory_table(inventory) + "\n</inventory>")
-    if pairs:
-        parts.append("<pairs>\n" + pairs + "\n</pairs>")
     if author_answers:
         parts.append(author_answers)
     parts.append(SET_EXAMPLES)
-    task = task or S1_TASK
-    if pairs:
-        from validator.pipeline.experiments import PAIRS_INSTRUCTION
-
-        task += "\n" + PAIRS_INSTRUCTION
-    if second_pass:
-        from validator.pipeline.experiments import SECOND_PASS_NOTE
-
-        task += "\n" + SECOND_PASS_NOTE
+    task = S1_TASK
     if author_answers:
         task += "\n" + AUTHOR_ANSWERS_NOTE
     parts.append(task)
@@ -146,7 +124,7 @@ def build_s1_prompt(doc: Document, reqs: list[Requirement], inventory: list[Inve
 
 
 def build_s2_prompt(doc: Document, reqs: list[Requirement], skipped: list[SkippedBlock], *,
-                    include_document: bool = True, entities: str = "", author_answers: str = "") -> str:
+                    include_document: bool = True, author_answers: str = "") -> str:
     parts = _common(doc, reqs, include_document)
     acc = [r for r in reqs if r.kind == ReqKind.ACCEPTANCE_CRITERION]
     parts.append("<acceptance_criteria>\n" + (requirement_table(acc) if acc else "в документе нет критериев приёмки")
@@ -154,36 +132,10 @@ def build_s2_prompt(doc: Document, reqs: list[Requirement], skipped: list[Skippe
     if skipped:
         parts.append("<skipped_blocks>\n" + "\n".join(f"{s.block_id} | {s.reason} | {s.text[:150]}" for s in skipped[:80])
                      + "\n</skipped_blocks>")
-    if entities:
-        from validator.pipeline.experiments import ENTITY_CHECKLIST
-
-        parts.append("<entities>\n" + entities + "\n</entities>")
-        if author_answers:
-            parts.append(author_answers)
-        parts.append(SET_EXAMPLES)
-        task = S2_TASK + "\n\n" + ENTITY_CHECKLIST
-        if author_answers:
-            task += "\n\n" + AUTHOR_ANSWERS_NOTE
-        parts.append(task)
-        return "\n\n".join(parts)
     if author_answers:
         parts.append(author_answers)
     parts.append(SET_EXAMPLES)
     task = S2_TASK + ("\n\n" + AUTHOR_ANSWERS_NOTE if author_answers else "")
-    parts.append(task)
-    return "\n\n".join(parts)
-
-
-def build_pairs_prompt(doc: Document, reqs: list[Requirement], *, include_document: bool = True,
-                       author_answers: str = "") -> str:
-    rule_kinds = {ReqKind.FUNCTIONAL, ReqKind.BUSINESS_GOAL, ReqKind.PROCESS, ReqKind.DATA, ReqKind.INTEGRATION,
-                  ReqKind.NONFUNCTIONAL, ReqKind.ACCEPTANCE_CRITERION, ReqKind.CONSTRAINT, ReqKind.OTHER}
-    rules = [r for r in reqs if r.kind in rule_kinds] or reqs
-    parts = _common(doc, rules, include_document)
-    if author_answers:
-        parts.append(author_answers)
-    parts.append(SET_EXAMPLES)
-    task = PAIRS_TASK + ("\n" + AUTHOR_ANSWERS_NOTE if author_answers else "")
     parts.append(task)
     return "\n\n".join(parts)
 

@@ -12,48 +12,6 @@ def test_mixed_levels_lens_is_on_and_accepts_appropriate():
     assert finding.criterion == "appropriate"
 
 
-def _req(rid, section, text):
-    from validator.models import Requirement
-
-    return Requirement(id=rid, id_assigned=True, kind="functional", part="p", section=section,
-                       block_ids=[], title=rid, quote=text)
-
-
-def test_pairs_share_an_entity_and_are_capped():
-    from validator.pipeline import experiments as exp
-
-    reqs = [_req("R1", "s1", "Продление выдачи не более 3 раз в месяц."),
-            _req("R2", "s2", "Счётчик продлений сбрасывается при изменении тарифа, лимит в месяц прежний."),
-            _req("R3", "s1", "Поле `reader_id` обязательно, при ошибке код 404."),
-            _req("R4", "s3", "Если `reader_id` не найден, вернуть 400."),
-            _req("R5", "s3", "Экран показывает логотип.")]
-    pairs = exp.pair_candidates(reqs)
-    ids = {(a, b) for a, b, _ in pairs}
-    assert ("R1", "R2") in ids and ("R3", "R4") in ids
-    assert all("R5" not in p for p in ids)
-    assert pairs[0][:2] == ("R1", "R2")  # rule-like overlap first
-    many = [_req(f"R{i}", f"s{i}", "лимит 5 в месяц") for i in range(12)]
-    assert len(exp.pair_candidates(many)) == 25
-
-
-def test_pair_enum_toggle_adds_the_pair_list_to_s1(monkeypatch):
-    from types import SimpleNamespace
-
-    from validator.pipeline.stages import setcheck
-
-    reqs = [_req("R1", "s1", "не более 3 раз в месяц"), _req("R2", "s2", "лимит в месяц сбрасывается")]
-    seen = []
-    ctx = SimpleNamespace(include_document=lambda n: False, call=lambda *a: seen.append(a[2]))
-    doc = SimpleNamespace(char_count=10, parts=[])
-    monkeypatch.setattr(setcheck, "build_s1_prompt",
-                        lambda d, r, i, **kw: f"{kw['pairs']}|{kw['second_pass']}")
-    setcheck.run_s1(ctx, doc, reqs, [])
-    monkeypatch.setenv("EXP_PAIR_ENUM", "1")
-    setcheck.run_s1(ctx, doc, reqs, [])
-    assert seen[0] == "|False"
-    assert seen[1].startswith("P1: R1 ↔ R2")
-
-
 def test_a_routed_call_uses_its_model_first_and_keeps_the_fallbacks():
     from tests.test_pipeline_llm import Scripted, _settings
     from validator.llm import LLMError

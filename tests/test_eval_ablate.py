@@ -11,7 +11,8 @@ from validator.pipeline import run_pipeline
 def test_variants_resolve_to_flags_and_toggles():
     assert ablate.resolve("full") == ([], {})
     assert ablate.resolve("rules_only") == (["--rules-only"], {})
-    assert ablate.resolve("no_critic+EXP_SCENARIOS") == ([], {"EXP_NO_REVIEW": "1", "EXP_SCENARIOS": "1"})
+    assert ablate.resolve("rules_only+no_critic") == (["--rules-only"], {"EXP_NO_REVIEW": "1"})
+    assert ablate.resolve("full+EXP_X") == ([], {"EXP_X": "1"})
     with pytest.raises(ValueError):
         ablate.resolve("bogus")
 

@@ -955,10 +955,8 @@ class ReviewOutcome:
 
 
 def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBuilder,
-                 stats: Stats, *, cautious: bool = False,
+                 stats: Stats, *,
                  author_answers: list[AuthorAnswer] | None = None) -> tuple[list[Candidate], ReviewOutcome]:
-    """`cautious`: only proven errors are removed, rule findings are untouched, only exact duplicates merge,
-    and a candidate the critic did not decide on is kept."""
     by_id = {c.cid: c for c in cands}
     dropped: set[str] = set()
     closed_by_answer: dict[str, list[str]] = {}
@@ -969,23 +967,6 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
             continue
         verdict = d.verdict
         matched_qids = _matching_answer_ids(d.counter_quote, answers)
-        if cautious:
-            if c.source == FindingSource.RULE and not matched_qids:
-                c.confirmed = True
-                continue
-            if verdict == "drop" and d.drop_reason in ("generic", "out_of_scope"):
-                c.confirmed = True  # an opinion, not a proof: kept as it is
-                continue
-            if verdict == "drop" and d.drop_reason == "document_specifies" and not matched_qids:
-                m = builder.index.find(d.counter_quote) if d.counter_quote.strip() else None
-                if m is None or m.status != QuoteStatus.VERIFIED:
-                    c.confirmed = True
-                    continue
-            if verdict == "merge" or d.drop_reason == "duplicate":
-                target = by_id.get(d.merge_into.strip())
-                if target is None or not (_same_place(target, c) and target.criterion == c.criterion):
-                    c.confirmed = True  # not an exact duplicate: two findings
-                    continue
         lowers = SEVERITY_RANK[Severity(d.severity)] > SEVERITY_RANK[c.severity]
         if c.protected and (verdict != "keep" or lowers) and not matched_qids:
             c.confirmed = True  # a rule-fixed critical gap is neither dropped nor lowered by the critic
@@ -1073,9 +1054,6 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                 c.options = []
                 c.option_consequences = []
     kept = [c for c in cands if c.cid not in dropped]
-    if cautious:
-        for c in kept:
-            c.confirmed = True  # when in doubt, keep: no silent removal of undecided candidates
     # the critic adds only critical defects, never notes about duplicates
     missed = [m for m in builder.from_set(review.missed[:5], FindingSource.REVIEW)
               if m.severity == Severity.CRITICAL and not _DUPLICATE_NOTE.search(m.explanation)

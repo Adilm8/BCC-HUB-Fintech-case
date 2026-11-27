@@ -20,7 +20,7 @@ ErrorKind = Literal[
 # only an explicit per-day quota is daily; "quota exceeded for metric" is also sent for per-minute limits
 DAILY_QUOTA = ("perday", "per day", "per_day", "requests per day")
 RATE_LIMIT = ("resource_exhausted", "rate_limit", "rate limit", "ratelimiterror", "too many requests")
-SERVER = ("unavailable", "overloaded", "internalservererror", "serviceunavailable", "bad gateway")
+SERVER = ("unavailable", "overloaded", "high demand", "internalservererror", "serviceunavailable", "bad gateway")
 NETWORK = ("connecterror", "connectionerror", "apiconnectionerror", "getaddrinfo", "name or service not known",
            "no connection could be made", "connection refused", "network is unreachable", "proxyerror",
            "nodename nor servname", "temporary failure in name resolution", "connection reset")

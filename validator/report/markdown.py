@@ -150,8 +150,9 @@ def _render_banner(report: Report) -> list[str]:
     if report.run.status == RunStatus.RULES_ONLY:
         lines.append(">")
         lines.append(
-            "> Выполнены только детерминированные проверки по правилам; рекомендуется "
-            "повторить полный запуск после восстановления доступа к провайдеру."
+            "> Выполнены только детерминированные проверки по правилам, итог не определён. Для полной "
+            "проверки запустите агента с ключом модели (без --rules-only) или повторите запуск, когда "
+            "провайдер снова доступен."
         )
 
     return lines
@@ -177,6 +178,9 @@ def _render_passport(report: Report) -> list[str]:
         ("Версия агента", _escape_cell(run.agent_version)),
         ("Профиль", _escape_cell(run.profile)),
         ("Число вызовов", str(run.llm_calls)),
+        ("Токены (вход / выход)", f"{run.input_tokens} / {run.output_tokens}"),
+        ("Стоимость", _escape_cell(
+            (f"≈ ${run.cost_usd:.4f} — {run.cost_note}" if run.cost_usd is not None else run.cost_note) or "—")),
         ("Статус прогона", _escape_cell(status_str)),
         ("Стандарты", _escape_cell(standards_str)),
     ]

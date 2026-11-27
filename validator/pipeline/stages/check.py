@@ -47,15 +47,6 @@ def make_batches(reqs: list[Requirement], profile: Profile) -> list[list[Require
     return [b for b in out if b]
 
 
-def run_dimension_pass(ctx: StageContext, doc: Document, reqs: list[Requirement], dims: str) -> StructuredResult:
-    from validator.pipeline.experiments import DIMENSION_TASK
-    from validator.pipeline.prompts.render import render_document, requirement_table
-
-    prompt = "\n\n".join([render_document(doc), "<requirements>\n" + requirement_table(reqs) + "\n</requirements>",
-                           DIMENSION_TASK.format(dims=dims)])
-    return ctx.call("check", LLMCheck, prompt, system_prompt())
-
-
 def run_check_batch(ctx: StageContext, doc: Document, batch: list[Requirement], all_reqs: list[Requirement],
                     hints: list[Hint]) -> StructuredResult:
     prompt = build_check_prompt(doc, batch, all_reqs, hints, include_document=ctx.include_document(doc.char_count))

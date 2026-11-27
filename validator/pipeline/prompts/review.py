@@ -38,13 +38,12 @@ AUTHOR_ANSWERS_NOTE = (
 
 
 def build_review_prompt(doc: Document, candidates_text: str, *, include_document: bool = True,
-                        task: str | None = None, author_answers: str = "") -> str:
+                        author_answers: str = "") -> str:
     parts = []
     if include_document:
         parts.append(render_document(doc))
     if author_answers:
         parts.append(author_answers)
     parts.append("<candidates>\n" + candidates_text + "\n</candidates>")
-    base_task = task or TASK
-    parts.append(base_task + ("\n" + AUTHOR_ANSWERS_NOTE if author_answers else ""))
+    parts.append(TASK + ("\n" + AUTHOR_ANSWERS_NOTE if author_answers else ""))
     return "\n\n".join(parts)

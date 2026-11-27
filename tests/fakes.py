@@ -23,10 +23,6 @@ def stage_of(schema: dict | None) -> str:
         return "review"
     if "coverage" in props:
         return "set"
-    if "entities" in props:
-        return "entities"
-    if "scenarios" in props:
-        return "scenarios"
     return "other"
 
 
@@ -99,35 +95,7 @@ def default_review(prompt: str, schema: dict) -> dict:
     }
 
 
-def default_entities(prompt: str, schema: dict) -> dict:
-    blocks = _BLOCK.findall(prompt)
-    mentions = [{"block_id": b, "quote": t[:30], "unit": ""} for b, t in blocks[:2]]
-    return {"entities": [{"name": "срок", "kind": "quantity", "mentions": mentions}]}
-
-
-def default_scenarios(prompt: str, schema: dict) -> dict:
-    rows = list(_REQ.finditer(section(prompt, "requirements")))
-    if len(rows) < 2:
-        return {"scenarios": []}
-    a, b = rows[0], rows[1]
-    blank = {"explanation": "", "severity": "minor", "recommendation": "", "clarifying_question": "",
-             "addressee": "analyst", "answer_options": []}
-    return {"scenarios": [
-        {"scenario": "Значение ровно на границе, затем настройку меняют в том же периоде.",
-         "readings": [{"requirement_id": a.group(1), "quote": a.group(7)[:60], "prescribes": "результат A"},
-                      {"requirement_id": b.group(1), "quote": b.group(7)[:60], "prescribes": "результат B"}],
-         "outcome": "contradictory", "explanation": "Два места дают разный результат для одного случая на границе.",
-         "severity": "critical", "recommendation": "Согласовать оба места.",
-         "clarifying_question": "Какой результат верный на границе?", "addressee": "business",
-         "answer_options": ["A", "B"]},
-        {"scenario": "Обычный случай внутри диапазона.",
-         "readings": [{"requirement_id": a.group(1), "quote": a.group(7)[:60], "prescribes": "результат A"}],
-         "outcome": "defined", **blank},
-    ]}
-
-
 DEFAULTS: dict[str, Responder] = {
-    "entities": default_entities, "scenarios": default_scenarios,
     "extract": default_extract, "check": default_check, "set": default_set, "review": default_review,
 }
 

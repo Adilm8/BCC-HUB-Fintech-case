@@ -282,10 +282,6 @@ def call_structured(
 ) -> StructuredResult:
     """One structured call with local repair and at most one corrective retry."""
     schema = provider_schema(model_cls)
-    from validator.pipeline import experiments as exp
-
-    if exp.enabled("EXP_SCHEMA_REASONING_FIRST"):
-        schema = exp.reasoning_first(schema)
     model_name = model or getattr(client, "model", "") or ""
     routed = {"model": model} if model else {}  # sent only when a stage is routed to another model
     def key_for(name: str) -> str:

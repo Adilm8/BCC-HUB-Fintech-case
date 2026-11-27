@@ -390,6 +390,10 @@ class RunInfo(BaseModel):
     agent_version: str
     profile: str
     llm_calls: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None  # estimate from the list price; None when the price is unknown or free
+    cost_note: str = ""
     status: RunStatus
     stages: list[StageStatus]
     standards: list[str]

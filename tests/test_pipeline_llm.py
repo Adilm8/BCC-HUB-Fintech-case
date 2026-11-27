@@ -128,3 +128,11 @@ def test_a_cached_fallback_answer_is_used_once_the_primary_is_out_of_quota(tmp_p
     fresh = Scripted(_settings(), [ok])
     r3 = call_structured(fresh, LLMCheck, "p1", system="s", budget=Budget(9), cache=cache)
     assert not r3.cached and fresh.models_called == ["m1"]
+
+
+def test_high_demand_503_is_retried_then_falls_back():
+    busy = RuntimeError("503 UNAVAILABLE: This model is currently experiencing high demand. Please try again later.")
+    assert classify_error(busy) == "server"
+    c = Scripted(_settings(max_retries=1), [busy, busy, "ok"])
+    resp = c.complete("p")
+    assert resp.model == "m2" and c.models_called == ["m1", "m1", "m2"]

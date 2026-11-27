@@ -10,6 +10,10 @@ PROVIDERS = {
 }
 # fallback models used when the environment does not name any
 DEFAULT_FALLBACKS: dict[str, tuple[str, ...]] = {"gemini": ("gemini-3.5-flash-lite",)}
+# list price in USD per 1M tokens (input, output) for the run passport's cost estimate
+MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {"claude-sonnet-5-5": (2.0, 10.0)}
+# providers whose models are used on a free tier by default
+FREE_TIER_FAMILIES = {"gemini"}
 # providers that answer one call at a time
 SEQUENTIAL_PROVIDERS = {"gemini"}
 # a provider added through the extension hook behaves like one of the built-in ones
@@ -171,3 +175,19 @@ class Settings:
             cache_dir=os.getenv("PIPELINE_CACHE_DIR", "").strip() or ".cache/validator",
             max_context_chars=_int("MAX_CONTEXT_CHARS", 120_000),
         )
+
+
+def estimate_cost(tokens_by_model: dict[str, tuple[int, int]], provider: str) -> tuple[float | None, str]:
+    """(cost in USD or None, a Russian note for the run passport)."""
+    used = {m: io for m, io in tokens_by_model.items() if io[0] or io[1]}
+    if not used:
+        return None, "модель не вызывалась"
+    if all(m in MODEL_PRICES_USD_PER_MTOK for m in used):
+        cost = sum(i * MODEL_PRICES_USD_PER_MTOK[m][0] / 1e6 + o * MODEL_PRICES_USD_PER_MTOK[m][1] / 1e6
+                   for m, (i, o) in used.items())
+        prices = "; ".join(f"{m}: ${MODEL_PRICES_USD_PER_MTOK[m][0]:g} / ${MODEL_PRICES_USD_PER_MTOK[m][1]:g} "
+                           "за 1 млн токенов (вход / выход)" for m in used)
+        return round(cost, 4), f"оценка по прайс-листу ({prices})"
+    if family(provider) in FREE_TIER_FAMILIES:
+        return None, "бесплатный тариф; на платном ключе — по прайс-листу провайдера"
+    return None, "цена модели неизвестна"
