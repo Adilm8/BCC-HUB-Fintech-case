@@ -13,6 +13,9 @@ RETRYABLE = (
 )
 
 
+DAILY_QUOTA = ("PerDay", "per day", "GenerateRequestsPerDay")
+
+
 class LLMError(RuntimeError):
     pass
 
@@ -37,6 +40,8 @@ class LLMClient:
                     errors.append(f"{model}: {msg[:200]}")
                     if not any(code.lower() in msg.lower() for code in RETRYABLE):
                         break
+                    if any(marker in msg for marker in DAILY_QUOTA):
+                        break  # daily quota will not recover within this run: go to the next model now
                     if attempt < self._settings.max_retries:
                         time.sleep(self._settings.retry_base_seconds * (2**attempt))
         raise LLMError("модель недоступна: " + " | ".join(errors[-3:]))

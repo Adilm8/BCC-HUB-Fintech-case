@@ -18,3 +18,9 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# local caches and run outputs
+.cache/
+eval/runs/
+eval/gold_private/
+
