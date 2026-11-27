@@ -75,8 +75,9 @@ def main(argv: list[str] | None = None) -> int:
 
 def _main(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="python -m validator", description="Проверка качества требований")
-    parser.add_argument("input", type=Path, help="путь к документу требований (.md, .txt, .pdf, .docx)")
-    parser.add_argument("output", type=Path, help="путь к файлу отчёта (.md)")
+    parser.add_argument("input", nargs="?", type=Path,
+                        help="путь к документу требований (.md, .txt, .pdf, .docx)")
+    parser.add_argument("output", nargs="?", type=Path, help="путь к файлу отчёта (.md)")
     parser.add_argument("--json", type=Path, default=None, help="путь к отчёту JSON (по умолчанию рядом с .md)")
     parser.add_argument("--no-json", action="store_true", help="не записывать отчёт JSON")
     parser.add_argument("--no-cache", action="store_true", help="не использовать кэш этапов")
@@ -87,7 +88,45 @@ def _main(argv: list[str] | None) -> int:
                         help="повторить прогон по записанной трассе: без ключа и без сети")
     parser.add_argument("--rules-only", action="store_true",
                         help="проверить только правилами, без модели (ключ не нужен; итог не определён)")
+    parser.add_argument("--questions-template", nargs=2, type=Path, metavar=("REPORT_JSON", "ANSWERS_YAML"),
+                        default=None,
+                        help="сформировать YAML-шаблон ответов из <report.json> в <answers.yaml>")
+    parser.add_argument("--answers", type=Path, default=None,
+                        help="путь к YAML-файлу с ответами автора ТЗ (требует --previous)")
+    parser.add_argument("--previous", type=Path, default=None,
+                        help="путь к предыдущему JSON-отчёту для повторной проверки с --answers")
     args = parser.parse_args(argv)
+
+    if args.questions_template is not None:
+        report_json, answers_yaml = args.questions_template
+        if _same_file(report_json, answers_yaml):
+            print("Ошибка: путь шаблона ответов совпадает с JSON-отчётом; укажите другой файл.", file=sys.stderr)
+            return 2
+        from validator.answers import write_questions_template
+
+        try:
+            count = write_questions_template(report_json, answers_yaml)
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            print(f"Ошибка: {exc}", file=sys.stderr)
+            return 2
+        print(f"Шаблон ответов записан: {answers_yaml} (вопросов: {count})")
+        return 0
+
+    if args.input is None or args.output is None:
+        print("Ошибка: укажите путь к документу требований и путь к файлу отчёта (.md), "
+              "либо используйте --questions-template <report.json> <answers.yaml>.", file=sys.stderr)
+        return 2
+
+    if args.answers is not None and args.previous is None:
+        print("Ошибка: вместе с --answers необходимо указать --previous <report.json>.", file=sys.stderr)
+        return 2
+    if args.previous is not None and args.answers is None:
+        print("Ошибка: флаг --previous используется только вместе с --answers <answers.yaml>.", file=sys.stderr)
+        return 2
+    if args.answers is not None and args.rules_only:
+        print("Ошибка: --answers нельзя совмещать с --rules-only.", file=sys.stderr)
+        return 2
+
     if _same_file(args.input, args.output) or (args.json is not None and _same_file(args.input, args.json)):
         print("Ошибка: путь отчёта совпадает с входным документом; укажите другой файл отчёта.", file=sys.stderr)
         return 2
@@ -97,6 +136,14 @@ def _main(argv: list[str] | None) -> int:
 
     if sum(bool(x) for x in (args.save_trace, args.replay, args.rules_only)) > 1:
         print("Ошибка: --save-trace, --replay и --rules-only нельзя сочетать.", file=sys.stderr)
+        return 2
+
+    json_path = _json_path(args)
+    if args.previous is not None and (
+        _same_file(args.previous, args.output)
+        or (json_path is not None and _same_file(args.previous, json_path))
+    ):
+        print("Ошибка: путь нового отчёта совпадает с --previous; укажите другой выходной файл.", file=sys.stderr)
         return 2
 
     load_dotenv()
@@ -128,6 +175,17 @@ def _main(argv: list[str] | None) -> int:
             settings = settings.with_overrides(**overrides)
         from validator.pipeline import run_pipeline
 
+        previous_report = None
+        author_answers = None
+        answer_warnings: list[str] = []
+        if args.answers is not None and args.previous is not None:
+            from validator.answers import load_answers, load_previous_report
+
+            previous_report = load_previous_report(args.previous)
+            author_answers, answer_warnings = load_answers(args.answers, previous_report)
+            for warning in answer_warnings:
+                print(f"Предупреждение: {warning}", file=sys.stderr, flush=True)
+
         client = None
         if replay is not None:
             client = replay
@@ -144,9 +202,26 @@ def _main(argv: list[str] | None) -> int:
 
             client = DisabledClient(settings)
             print(f"Проверка {args.input} только правилами, без модели", file=sys.stderr, flush=True)
+        elif author_answers is not None:
+            print(
+                f"Уточняющая проверка {args.input} с ответами {args.answers} (профиль {settings.profile.name})",
+                file=sys.stderr,
+                flush=True,
+            )
         else:
             print(f"Проверка {args.input} (профиль {settings.profile.name})", file=sys.stderr, flush=True)
-        report = run_pipeline(args.input, settings, on_event=_progress, client=client)
+        report = run_pipeline(
+            args.input,
+            settings,
+            on_event=_progress,
+            client=client,
+            previous_report=previous_report,
+            answers=author_answers,
+            previous_report_name=args.previous.name if args.previous is not None else "",
+        )
+        for warning in answer_warnings:
+            if warning not in report.run.warnings:
+                report.run.warnings.append(warning)
     except (ValueError, FileNotFoundError) as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
         return 2
@@ -154,7 +229,6 @@ def _main(argv: list[str] | None) -> int:
         print(f"Ошибка модели: {exc}", file=sys.stderr)
         return 2
 
-    json_path = _json_path(args)
     try:
         # JSON first: if rendering fails, the paid run is still saved
         if json_path is not None:

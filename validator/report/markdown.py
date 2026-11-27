@@ -11,6 +11,7 @@ from validator.models import (
     Criterion,
     Evidence,
     Finding,
+    FindingDeltaStatus,
     Question,
     QuoteStatus,
     Report,
@@ -38,8 +39,10 @@ from validator.report.labels import (
     criterion_label,
     criterion_ref,
     defect_class_label,
+    finding_delta_status_label,
     req_kind_label,
     set_check_label,
+    severity_label,
 )
 
 
@@ -242,6 +245,7 @@ def _render_short_summary(report: Report) -> list[str]:
     dev_ready = READINESS_LABELS.get(verdict.development, str(verdict.development))
     test_ready = READINESS_LABELS.get(verdict.testing, str(verdict.testing))
 
+    refinement_link = "[Уточнение: было → стало](#уточнение-было--стало) · " if report.refinement is not None else ""
     return [
         "## Коротко",
         "",
@@ -263,6 +267,7 @@ def _render_short_summary(report: Report) -> list[str]:
         "",
         (
             "**Переход к разделам:** "
+            f"{refinement_link}"
             "[Нарезка требований](#нарезка-требований) · "
             "[Проверка каждого требования](#проверка-каждого-требования) · "
             "[Проверка набора требований](#проверка-набора-требований) · "
@@ -272,6 +277,110 @@ def _render_short_summary(report: Report) -> list[str]:
             "[Приложение](#приложение)"
         ),
     ]
+
+
+def _delta_str(before: int, after: int) -> str:
+    diff = after - before
+    if diff > 0:
+        return f"+{diff}"
+    return str(diff)
+
+
+def _render_refinement(report: Report) -> list[str]:
+    ref = report.refinement
+    if ref is None:
+        return []
+
+    closed_n = sum(1 for d in ref.finding_deltas if d.status == FindingDeltaStatus.CLOSED)
+    changed_n = sum(1 for d in ref.finding_deltas if d.status == FindingDeltaStatus.CHANGED)
+    remained_n = sum(1 for d in ref.finding_deltas if d.status == FindingDeltaStatus.REMAINED)
+    prev_dev = READINESS_LABELS.get(ref.previous_verdict_development, str(ref.previous_verdict_development))
+    curr_dev = READINESS_LABELS.get(ref.current_verdict_development, str(ref.current_verdict_development))
+    prev_test = READINESS_LABELS.get(ref.previous_verdict_testing, str(ref.previous_verdict_testing))
+    curr_test = READINESS_LABELS.get(ref.current_verdict_testing, str(ref.current_verdict_testing))
+
+    source_note = f" (предыдущий отчёт: `{_escape_cell(ref.previous_report_name)}`)" if ref.previous_report_name else ""
+    lines = [
+        "## Уточнение: было → стало",
+        "",
+        (
+            f"Учтено ответов автора: **{ref.answers_total}**{source_note}. "
+            f"По предыдущим находкам: **закрыто ответом** — {closed_n}, "
+            f"**изменилось** — {changed_n}, **осталось** — {remained_n}."
+        ),
+        "",
+        "| Показатель | Было | Стало | Изменение |",
+        "| --- | ---: | ---: | --- |",
+        (
+            f"| Открытых нарушений всего | {ref.previous_findings_total} | {ref.current_findings_total} | "
+            f"{_delta_str(ref.previous_findings_total, ref.current_findings_total)} |"
+        ),
+    ]
+    for sev in (Severity.CRITICAL, Severity.MAJOR, Severity.MINOR):
+        before_val = ref.previous_findings_by_severity.get(sev.value, 0)
+        after_val = ref.current_findings_by_severity.get(sev.value, 0)
+        lines.append(
+            f"| {SEVERITY_PLURAL_LABELS[sev]} | {before_val} | {after_val} | {_delta_str(before_val, after_val)} |"
+        )
+    dev_change = "без изменений" if prev_dev == curr_dev else f"{prev_dev} → {curr_dev}"
+    test_change = "без изменений" if prev_test == curr_test else f"{prev_test} → {curr_test}"
+    lines.extend(
+        [
+            f"| Готовность разработки | {_escape_cell(prev_dev)} | {_escape_cell(curr_dev)} | {_escape_cell(dev_change)} |",
+            f"| Готовность тестирования | {_escape_cell(prev_test)} | {_escape_cell(curr_test)} | {_escape_cell(test_change)} |",
+        ]
+    )
+
+    if ref.previous_verdict_headline or ref.current_verdict_headline:
+        lines.append("")
+        if ref.previous_verdict_headline:
+            lines.append(f"- **Вердикт было:** {ref.previous_verdict_headline}")
+        if ref.current_verdict_headline:
+            lines.append(f"- **Вердикт стало:** {ref.current_verdict_headline}")
+
+    lines.extend(["", "### Ответы автора и эффект", ""])
+    if not ref.question_effects:
+        lines.append("Заполненных ответов автора не передано.")
+    else:
+        lines.extend(
+            [
+                "| Вопрос | Формулировка вопроса | Ответ автора | Эффект |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for row in ref.question_effects:
+            q_text = row.question_text or "—"
+            lines.append(
+                f"| {_escape_cell(row.question_id)} | {_escape_cell(q_text)} | "
+                f"{_escape_cell(row.answer)} | {_escape_cell(row.effect)} |"
+            )
+
+    lines.extend(["", "### Статус предыдущих находок", ""])
+    if not ref.finding_deltas:
+        lines.append("В предыдущем отчёте открытых находок не было.")
+    else:
+        lines.extend(
+            [
+                "| Предыдущий ID | Было (критичность) | Статус | Стало (ID и критичность) | Комментарий |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for d in ref.finding_deltas:
+            status_ru = finding_delta_status_label(d.status)
+            prev_sev = severity_label(d.previous_severity)
+            if d.current_id and d.current_severity is not None:
+                curr_cell = f"{d.current_id} ({severity_label(d.current_severity)})"
+            elif d.current_id:
+                curr_cell = d.current_id
+            else:
+                curr_cell = "—"
+            note_cell = d.note or "—"
+            lines.append(
+                f"| {_escape_cell(d.previous_id)} | {_escape_cell(prev_sev)} | "
+                f"{_escape_cell(status_ru)} | {_escape_cell(curr_cell)} | {_escape_cell(note_cell)} |"
+            )
+
+    return lines
 
 
 def _render_slicing(report: Report) -> list[str]:
@@ -370,8 +479,15 @@ def _render_full_finding(finding: BaseFinding, heading_title: str) -> list[str]:
     lines.append(f"- **Уточняющий вопрос** ({addressee_label(finding.addressee)}): {finding.clarifying_question}")
     if finding.answer_options:
         lines.append("- **Варианты ответа:**")
-        for opt in finding.answer_options:
+        for idx, opt in enumerate(finding.answer_options):
             lines.append(f"  - {opt}")
+            cons = (
+                finding.option_consequences[idx].strip()
+                if idx < len(finding.option_consequences)
+                else ""
+            )
+            if cons:
+                lines.append(f"    - *Что изменится:* {cons}")
     if finding.review_note:
         lines.append(f"- **Примечание пересмотра:** {finding.review_note}")
     return lines
@@ -742,8 +858,15 @@ def _render_question_block(question: Question) -> list[str]:
     ]
     if question.options:
         lines.append("- **Варианты ответа:**")
-        for opt in question.options:
+        for idx, opt in enumerate(question.options):
             lines.append(f"  - {opt}")
+            cons = (
+                question.option_consequences[idx].strip()
+                if idx < len(question.option_consequences)
+                else ""
+            )
+            if cons:
+                lines.append(f"    - *Что изменится:* {cons}")
     return lines
 
 
@@ -923,6 +1046,12 @@ def render_markdown(report: Report) -> str:
         [
             _render_passport(report),
             _render_short_summary(report),
+        ]
+    )
+    if report.refinement is not None:
+        blocks.append(_render_refinement(report))
+    blocks.extend(
+        [
             _render_slicing(report),
             _render_per_requirement(report),
             _render_set_check(report),

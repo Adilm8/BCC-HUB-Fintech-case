@@ -926,6 +926,31 @@
     select.value = "all";
   }
 
+  function buildOptionsList(options, consequences) {
+    if (!Array.isArray(options) || options.length === 0) {
+      return null;
+    }
+    const consArr = Array.isArray(consequences) ? consequences : [];
+    const items = options.map((opt, idx) => {
+      const text = isPlainObject(opt) ? String(opt.text || opt.option || "") : String(opt || "");
+      const cons = isPlainObject(opt)
+        ? String(opt.consequence || "")
+        : typeof consArr[idx] === "string"
+          ? consArr[idx].trim()
+          : "";
+      if (!cons) {
+        return el("li", null, text);
+      }
+      return el(
+        "li",
+        null,
+        el("span", null, text),
+        el("div", { className: "option-consequence" }, `Что изменится: ${cons}`),
+      );
+    });
+    return el("ul", { className: "answer-options" }, ...items);
+  }
+
   // Shared finding card builder used in both "Нарушения" and "Проверка набора".
   function buildFindingCard(item, idPrefix) {
     const sevMeta = SEVERITY_META[item.severity] || SEVERITY_META.minor;
@@ -1011,14 +1036,7 @@
 
     let questionBox = null;
     if (item.clarifying_question) {
-      let optionsNode = null;
-      if (Array.isArray(item.answer_options) && item.answer_options.length > 0) {
-        optionsNode = el(
-          "ul",
-          { className: "answer-options" },
-          ...item.answer_options.map((opt) => el("li", null, opt)),
-        );
-      }
+      const optionsNode = buildOptionsList(item.answer_options, item.option_consequences);
       questionBox = el(
         "div",
         { className: "finding-question-box" },
@@ -1438,14 +1456,7 @@
         q.blocking ? makeChip("● Блокирующий", "chip--critical") : makeChip("Уточнение", "chip--neutral"),
       );
 
-      let optionsNode = null;
-      if (Array.isArray(q.options) && q.options.length > 0) {
-        optionsNode = el(
-          "ul",
-          { className: "answer-options" },
-          ...q.options.map((opt) => el("li", null, opt)),
-        );
-      }
+      const optionsNode = buildOptionsList(q.options, q.option_consequences);
 
       const metaParts = [];
       if (q.section) {

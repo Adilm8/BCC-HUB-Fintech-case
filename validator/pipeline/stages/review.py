@@ -8,12 +8,13 @@ from validator.pipeline.stages import StageContext
 from validator.pipeline.structured import StructuredResult
 
 
-def run_review(ctx: StageContext, doc: Document, candidates_text: str, *, cautious: bool = False) -> StructuredResult:
+def run_review(ctx: StageContext, doc: Document, candidates_text: str, *, cautious: bool = False,
+               author_answers: str = "") -> StructuredResult:
     task = None
     if cautious:
         from validator.pipeline.prompts.experimental import CAUTIOUS_REVIEW_TASK
 
         task = CAUTIOUS_REVIEW_TASK
     prompt = build_review_prompt(doc, candidates_text, include_document=ctx.include_document(doc.char_count),
-                                 task=task)
+                                 task=task, author_answers=author_answers)
     return ctx.call("review", LLMReview, prompt, system_prompt())

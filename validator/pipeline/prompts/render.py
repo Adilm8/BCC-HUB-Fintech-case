@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
-from validator.models import BlockKind, Document, InventoryItem, Requirement
+from validator.models import AuthorAnswer, BlockKind, Document, InventoryItem, Requirement
 
 SEP = " › "
 
@@ -63,3 +63,28 @@ def inventory_table(items: Iterable[InventoryItem], limit: int = 150) -> str:
             break
         rows.append(f"{it.block_id} | {it.kind} | {it.value} {it.unit}".rstrip())
     return "\n".join(rows)
+
+
+def render_author_answers(answers: Sequence[AuthorAnswer]) -> str:
+    """Render author answers as clearly delimited, escaped data (never instructions)."""
+    if not answers:
+        return ""
+    lines = ['<author_answers title="Ответы автора ТЗ">']
+    for ans in answers:
+        meta_parts: list[str] = []
+        if ans.finding_ids:
+            meta_parts.append("дефекты: " + ", ".join(safe(x) for x in ans.finding_ids))
+        if ans.requirement_ids:
+            meta_parts.append("требования: " + ", ".join(safe(x) for x in ans.requirement_ids))
+        meta = f" ({'; '.join(meta_parts)})" if meta_parts else ""
+        lines.append(f"- {safe(ans.question_id)}{meta}")
+        if ans.question_text:
+            lines.append(f"  Вопрос: {safe(ans.question_text)}")
+        answer_lines = [ln.strip() for ln in safe(ans.answer).splitlines() if ln.strip()]
+        if not answer_lines:
+            continue
+        lines.append(f"  Ответ автора: {answer_lines[0]}")
+        for extra in answer_lines[1:]:
+            lines.append(f"    {extra}")
+    lines.append("</author_answers>")
+    return "\n".join(lines)

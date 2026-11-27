@@ -14,7 +14,8 @@ from validator.pipeline.structured import StructuredResult
 
 
 def run_s1(ctx: StageContext, doc: Document, reqs: list[Requirement],
-           inventory: list[InventoryItem], *, second_pass: bool = False, part: str = "") -> StructuredResult:
+           inventory: list[InventoryItem], *, second_pass: bool = False, part: str = "",
+           author_answers: str = "") -> StructuredResult:
     """`part`: "" — the whole S1; "rules" or "contracts" — one half of a split S1."""
     from validator.pipeline import experiments as exp
     from validator.pipeline.prompts.experimental import S1_CONTRACT_TASK, S1_RULES_TASK
@@ -24,19 +25,22 @@ def run_s1(ctx: StageContext, doc: Document, reqs: list[Requirement],
         pairs = exp.pairs_text(exp.pair_candidates(reqs), reverse=second_pass)
     task = {"rules": S1_RULES_TASK, "contracts": S1_CONTRACT_TASK}.get(part)
     prompt = build_s1_prompt(doc, reqs, inventory, include_document=ctx.include_document(doc.char_count),
-                             pairs=pairs, second_pass=second_pass, task=task)
+                             pairs=pairs, second_pass=second_pass, task=task, author_answers=author_answers)
     return ctx.call("set_check", LLMSetCheck, prompt, system_prompt())
 
 
 def run_s2(ctx: StageContext, doc: Document, reqs: list[Requirement],
-           skipped: list[SkippedBlock], entities: str = "") -> StructuredResult:
+           skipped: list[SkippedBlock], entities: str = "", *,
+           author_answers: str = "") -> StructuredResult:
     prompt = build_s2_prompt(doc, reqs, skipped, include_document=ctx.include_document(doc.char_count),
-                             entities=entities)
+                             entities=entities, author_answers=author_answers)
     return ctx.call("set_check", LLMSetCheck, prompt, system_prompt())
 
 
-def run_pairs(ctx: StageContext, doc: Document, reqs: list[Requirement]) -> StructuredResult:
-    prompt = build_pairs_prompt(doc, reqs, include_document=ctx.include_document(doc.char_count))
+def run_pairs(ctx: StageContext, doc: Document, reqs: list[Requirement], *,
+              author_answers: str = "") -> StructuredResult:
+    prompt = build_pairs_prompt(doc, reqs, include_document=ctx.include_document(doc.char_count),
+                                author_answers=author_answers)
     return ctx.call("set_check", LLMSetCheck, prompt, system_prompt())
 
 
@@ -62,6 +66,7 @@ def run_entities(ctx: StageContext, doc: Document) -> StructuredResult:
 
 
 def run_merged(ctx: StageContext, doc: Document, reqs: list[Requirement], inventory: list[InventoryItem],
-               skipped: list[SkippedBlock]) -> StructuredResult:
-    prompt = build_merged_prompt(doc, reqs, inventory, skipped, include_document=ctx.include_document(doc.char_count))
+               skipped: list[SkippedBlock], *, author_answers: str = "") -> StructuredResult:
+    prompt = build_merged_prompt(doc, reqs, inventory, skipped, include_document=ctx.include_document(doc.char_count),
+                                 author_answers=author_answers)
     return ctx.call("set_check", LLMSetCheck, prompt, system_prompt())

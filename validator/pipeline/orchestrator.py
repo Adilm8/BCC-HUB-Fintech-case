@@ -19,6 +19,7 @@ from validator.llm import LLMClient, LLMError, make_client
 from validator.models import (
     STAGE_TITLES,
     STANDARDS,
+    AuthorAnswer,
     BlockKind,
     CoverageRow,
     Criterion,
@@ -26,6 +27,7 @@ from validator.models import (
     FindingSource,
     PrecheckResult,
     RawDocument,
+    RefinementSummary,
     Report,
     ReportDebug,
     ReqKind,
@@ -41,6 +43,7 @@ from validator.models import (
 )
 from validator.pipeline import postprocess as pp
 from validator.pipeline.prompts.io import LLMCheck, LLMExtraction, LLMReview, LLMSetCheck
+from validator.pipeline.prompts.render import render_author_answers
 from validator.pipeline.quotes import QuoteIndex
 from validator.pipeline.stages import StageContext
 from validator.pipeline.stages.check import make_batches, run_check_batch, run_dimension_pass
@@ -215,7 +218,16 @@ class _Run:
 
 def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                  on_event: Callable[[StageEvent], None] | None = None,
-                 client: LLMClient | None = None) -> Report:
+                 client: LLMClient | None = None,
+                 previous_report: Report | None = None,
+                 answers: list[AuthorAnswer] | None = None,
+                 previous_report_name: str = "") -> Report:
+    if answers is not None and previous_report is None:
+        raise ValueError("Для режима --answers требуется предыдущий отчёт (--previous).")
+    answers_mode = previous_report is not None and answers is not None
+    author_answers = list(answers or [])
+    answers_block = render_author_answers(author_answers) if answers_mode else ""
+
     started_at = datetime.now().astimezone()
     t_start = time.monotonic()
     run = _Run(settings, on_event)
@@ -236,6 +248,17 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     for w in doc.warnings:
         if w not in run.warnings:
             run.warnings.append(w)
+
+    if answers_mode and previous_report is not None:
+        if previous_report.run.document_sha256 and previous_report.run.document_sha256 != doc.sha256:
+            run.warnings.append(
+                "SHA-256 документа отличается от версии из предыдущего отчёта: нарезка и проверки отдельных "
+                "требований переиспользованы из предыдущего отчёта."
+            )
+        if not author_answers:
+            run.warnings.append(
+                "В файле ответов нет заполненных полей answer: повторная проверка выполнена без новых уточнений."
+            )
 
     run.emit(StageKey.PRECHECKS, StageState.RUNNING)
     try:
@@ -278,34 +301,47 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     # ---------------------------------------------------------- extract
     extraction: LLMExtraction | None = None
-    run.emit(StageKey.EXTRACT, StageState.RUNNING)
-    if doc.char_count > settings.max_context_chars:
-        # one call cannot hold the whole document: cut by rules, check batch by batch with their own blocks
-        run.emit(StageKey.EXTRACT, StageState.SKIPPED, LONG_DOC_DETAIL)
-        run.warnings.append(
-            f"Документ длиннее {settings.max_context_chars} символов: нарезка выполнена правилами по блокам, "
-            "проверка идёт батчами без полного текста документа.")
+    if answers_mode and previous_report is not None:
+        ext = pp.Extracted(
+            requirements=[r.model_copy(deep=True) for r in previous_report.requirements],
+            skipped=[s.model_copy(deep=True) for s in previous_report.skipped_blocks],
+            added_by_code=0,
+        )
+        reqs = ext.requirements
+        run.emit(
+            StageKey.EXTRACT,
+            StageState.CACHED,
+            f"из предыдущего отчёта (требований: {len(reqs)}, служебных блоков: {len(ext.skipped)})",
+        )
     else:
-        try:
-            t_extract = time.monotonic()
-            res = run_extract(ctx, doc)
-            durations.append(time.monotonic() - t_extract)
-            run.account(StageKey.EXTRACT, res)
-            extraction = res.data
-            stats.dropped_schema_items += res.dropped_items
-            if res.truncated:
-                run.warnings.append("Ответ нарезчика обрезан: часть блоков отнесена к требованиям правилами.")
-        except LLMError as exc:
-            fatal_from(exc)
-            reason = run.fail(StageKey.EXTRACT, exc)
-            run.warnings.append(f"Нарезка выполнена правилами: {reason}.")
-    ext = pp.build_requirements(doc, extraction, index)
-    reqs = ext.requirements
-    if extraction is not None:
-        detail = f"требований: {len(reqs)}, служебных блоков: {len(ext.skipped)}"
-        if ext.added_by_code:
-            detail += f", добавлено кодом: {ext.added_by_code}"
-        run.emit(StageKey.EXTRACT, run.finished_state(StageKey.EXTRACT), detail)
+        run.emit(StageKey.EXTRACT, StageState.RUNNING)
+        if doc.char_count > settings.max_context_chars:
+            # one call cannot hold the whole document: cut by rules, check batch by batch with their own blocks
+            run.emit(StageKey.EXTRACT, StageState.SKIPPED, LONG_DOC_DETAIL)
+            run.warnings.append(
+                f"Документ длиннее {settings.max_context_chars} символов: нарезка выполнена правилами по блокам, "
+                "проверка идёт батчами без полного текста документа.")
+        else:
+            try:
+                t_extract = time.monotonic()
+                res = run_extract(ctx, doc)
+                durations.append(time.monotonic() - t_extract)
+                run.account(StageKey.EXTRACT, res)
+                extraction = res.data
+                stats.dropped_schema_items += res.dropped_items
+                if res.truncated:
+                    run.warnings.append("Ответ нарезчика обрезан: часть блоков отнесена к требованиям правилами.")
+            except LLMError as exc:
+                fatal_from(exc)
+                reason = run.fail(StageKey.EXTRACT, exc)
+                run.warnings.append(f"Нарезка выполнена правилами: {reason}.")
+        ext = pp.build_requirements(doc, extraction, index)
+        reqs = ext.requirements
+        if extraction is not None:
+            detail = f"требований: {len(reqs)}, служебных блоков: {len(ext.skipped)}"
+            if ext.added_by_code:
+                detail += f", добавлено кодом: {ext.added_by_code}"
+            run.emit(StageKey.EXTRACT, run.finished_state(StageKey.EXTRACT), detail)
 
     builder = pp.CandidateBuilder(doc, reqs, index, stats)
     candidates: list[pp.Candidate] = builder.from_rules(pre.findings)
@@ -318,6 +354,18 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     checked: set[str] = set()
     check_ok = False
     set_ok = False
+    if answers_mode and previous_report is not None:
+        prev_check_cands = pp.candidates_from_previous_findings(previous_report.findings)
+        candidates.extend(prev_check_cands)
+        counts["check"] = len(prev_check_cands)
+        checked = {r.id for r in reqs if r.check_status == "checked"}
+        check_ok = bool(checked) or not reqs
+        run.emit(
+            StageKey.CHECK,
+            StageState.CACHED,
+            f"из предыдущего отчёта (проверено требований: {len(checked)} из {len(reqs)}, "
+            f"находок: {len(prev_check_cands)})",
+        )
 
     # ---------------------------------------------------------- wave: check batches + set checks
     batch_profile = profile
@@ -339,8 +387,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     if scenarios and family(getattr(client, "provider", "")) in SEQUENTIAL_PROVIDERS:
         # the scenario writer is paid for with one check batch on a sequential provider
         batch_profile = replace(batch_profile, max_batches=max(1, batch_profile.max_batches - 1))
-    batches = make_batches(reqs, batch_profile)
-    if dimension_pass and reqs:
+    batches = [] if answers_mode else make_batches(reqs, batch_profile)
+    if dimension_pass and reqs and not answers_mode:
         batches = [reqs for _ in exp.DIMENSIONS]  # two passes over the whole set, one per group of dimensions
     for name in exp.active():
         run.warnings.append(f"Включён экспериментальный режим {name}.")
@@ -350,10 +398,12 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         if os.getenv(var, "").strip():
             run.warnings.append(f"Этап {stage_name} идёт на модели {os.getenv(var, '').strip()} ({var}).")
     if fatal or not reqs:
-        for key in (StageKey.CHECK, StageKey.SET_CHECK):
+        skip_keys = (StageKey.SET_CHECK,) if answers_mode else (StageKey.CHECK, StageKey.SET_CHECK)
+        for key in skip_keys:
             run.emit(key, StageState.SKIPPED, fatal or "нет требований для проверки")
     else:
-        run.emit(StageKey.CHECK, StageState.RUNNING, total=len(batches), done=0)
+        if not answers_mode:
+            run.emit(StageKey.CHECK, StageState.RUNNING, total=len(batches), done=0)
         run.emit(StageKey.SET_CHECK, StageState.RUNNING)
         def typical_call() -> float:
             done = sorted(durations)
@@ -385,7 +435,9 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                 return res
             return task
 
-        if dimension_pass:
+        if answers_mode:
+            check_tasks: list[tuple[str, Callable[[], StructuredResult]]] = []
+        elif dimension_pass:
             check_tasks = [(f"check:{i}", timed(lambda d=d: run_dimension_pass(ctx, doc, reqs, d), optional=True,
                                                 key=StageKey.CHECK))
                            for i, d in enumerate(exp.DIMENSIONS)]
@@ -404,28 +456,48 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                     raise
                 run.warnings.append(f"Сбор сущностей не выполнен: {describe_error(exc)}.")
         if profile.merge_set_checks:
-            set_tasks = [("set:merged", timed(lambda: run_merged(ctx, doc, reqs, pre.inventory, ext.skipped),
-                                              optional=False))]
+            set_tasks = [("set:merged", timed(
+                lambda: run_merged(ctx, doc, reqs, pre.inventory, ext.skipped, author_answers=answers_block),
+                optional=False,
+            ))]
         else:
-            set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory), optional=False)),
-                         ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped, entities_text),
-                                          optional=False))]
+            set_tasks = [
+                ("set:s1", timed(
+                    lambda: run_s1(ctx, doc, reqs, pre.inventory, author_answers=answers_block),
+                    optional=False,
+                )),
+                ("set:s2", timed(
+                    lambda: run_s2(ctx, doc, reqs, ext.skipped, entities_text, author_answers=answers_block),
+                    optional=False,
+                )),
+            ]
             if exp.enabled("EXP_SPLIT_S1"):
                 # S1 as two narrower calls: behaviour rules, then interface and data contracts
-                set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, part="rules"),
-                                              optional=False)),
-                             ("set:s1c", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, part="contracts"),
-                                               optional=False)),
-                             *set_tasks[1:]]
+                set_tasks = [
+                    ("set:s1", timed(
+                        lambda: run_s1(ctx, doc, reqs, pre.inventory, part="rules", author_answers=answers_block),
+                        optional=False,
+                    )),
+                    ("set:s1c", timed(
+                        lambda: run_s1(ctx, doc, reqs, pre.inventory, part="contracts", author_answers=answers_block),
+                        optional=False,
+                    )),
+                    *set_tasks[1:],
+                ]
             if scenarios:
                 set_tasks.insert(1, ("set:scen", timed(lambda: run_scenarios(ctx, doc, reqs), optional=True)))
             if two_pass:
                 # a second, independently ordered S1: union of both for recall, the critic filters
-                set_tasks.insert(1, ("set:s1r", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory, second_pass=True),
-                                                      optional=True)))
+                set_tasks.insert(1, ("set:s1r", timed(
+                    lambda: run_s1(ctx, doc, reqs, pre.inventory, second_pass=True, author_answers=answers_block),
+                    optional=True,
+                )))
             if family(getattr(client, "provider", "")) in PAIR_LENS_PROVIDERS:
                 # a smaller model misses conflicts between two functional rules: one short dedicated call
-                set_tasks.insert(1, ("set:s1b", timed(lambda: run_pairs(ctx, doc, reqs), optional=True)))
+                set_tasks.insert(1, ("set:s1b", timed(
+                    lambda: run_pairs(ctx, doc, reqs, author_answers=answers_block),
+                    optional=True,
+                )))
         workers = 1 if getattr(client, "provider", "") in SEQUENTIAL_PROVIDERS else max(1, profile.parallel)
         # one call at a time: the set checks find the critical contradictions, so they go first and the
         # per-requirement batches are the ones dropped when time runs out
@@ -445,62 +517,63 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                     done_batches += 1
                     run.emit(StageKey.CHECK, StageState.RUNNING, done=done_batches, total=len(batches))
 
-        # check results
-        failed_batches: list[list[Requirement]] = []
-        failures: list[BaseException] = []
-        missing: list[Requirement] = []
-        for i, b in enumerate(batches):
-            r = results[f"check:{i}"]
-            if isinstance(r, BaseException):
-                failed_batches.append(b)
-                failures.append(r)
-                run.account(StageKey.CHECK, None, getattr(r, "responses", None))
-                continue
-            run.account(StageKey.CHECK, r)
-            stats.dropped_schema_items += r.dropped_items
-            data: LLMCheck = r.data
-            cands, seen = builder.from_check(data.results)
-            candidates.extend(cands)
-            checked |= seen
-            if dimension_pass:
-                checked |= {x.id for x in b}  # a dimension pass reports only requirements with findings
-            else:
-                missing.extend(x for x in b if x.id not in seen)
-        for exc in failures:
-            if getattr(exc, "kind", "") in ABORT_KINDS:
-                raise exc
-            fatal_from(exc)
-        # one top-up call for requirements the model skipped or could not reach
-        to_retry = missing + [x for b in failed_batches for x in b]
-        reserve = 1 if profile.review else 0
-        enough_time = deadline - review_reserve - time.monotonic() > typical_call()
-        if to_retry and not fatal and not doomed and budget.remaining > reserve and enough_time:
-            topup = to_retry[:TOPUP_LIMIT]
-            try:
-                r = run_check_batch(ctx, doc, topup, reqs, pre.hints)
+        if not answers_mode:
+            # check results
+            failed_batches: list[list[Requirement]] = []
+            failures: list[BaseException] = []
+            missing: list[Requirement] = []
+            for i, b in enumerate(batches):
+                r = results[f"check:{i}"]
+                if isinstance(r, BaseException):
+                    failed_batches.append(b)
+                    failures.append(r)
+                    run.account(StageKey.CHECK, None, getattr(r, "responses", None))
+                    continue
                 run.account(StageKey.CHECK, r)
-                cands, seen = builder.from_check(r.data.results)
+                stats.dropped_schema_items += r.dropped_items
+                data: LLMCheck = r.data
+                cands, seen = builder.from_check(data.results)
                 candidates.extend(cands)
                 checked |= seen
-            except LLMError as exc:
-                run.account(StageKey.CHECK, None, getattr(exc, "responses", None))
+                if dimension_pass:
+                    checked |= {x.id for x in b}  # a dimension pass reports only requirements with findings
+                else:
+                    missing.extend(x for x in b if x.id not in seen)
+            for exc in failures:
+                if getattr(exc, "kind", "") in ABORT_KINDS:
+                    raise exc
                 fatal_from(exc)
-        check_ok = bool(checked)
-        counts["check"] = sum(1 for c in candidates if c.source == FindingSource.LLM)
-        not_checked = [x for x in reqs if x.id not in checked]
-        if check_ok:
-            n_check = sum(1 for c in candidates if c.source == FindingSource.LLM)
-            detail = (f"батчей: {len(batches)}, проверено требований: {len(checked)} из {len(reqs)}, "
-                      f"кандидатов: {n_check}")
-            run.emit(StageKey.CHECK, run.finished_state(StageKey.CHECK), detail)
-            if not_checked:
-                run.warnings.append(f"Не проверено требований: {len(not_checked)} "
-                                    f"({', '.join(x.id for x in not_checked[:15])}).")
-        else:
-            reason = describe_error(failures[0]) if failures else \
-                "модель не вернула результатов"
-            run.emit(StageKey.CHECK, StageState.FAILED, reason)
-            run.warnings.append(f"Проверка требований не выполнена: {reason}.")
+            # one top-up call for requirements the model skipped or could not reach
+            to_retry = missing + [x for b in failed_batches for x in b]
+            reserve = 1 if profile.review else 0
+            enough_time = deadline - review_reserve - time.monotonic() > typical_call()
+            if to_retry and not fatal and not doomed and budget.remaining > reserve and enough_time:
+                topup = to_retry[:TOPUP_LIMIT]
+                try:
+                    r = run_check_batch(ctx, doc, topup, reqs, pre.hints)
+                    run.account(StageKey.CHECK, r)
+                    cands, seen = builder.from_check(r.data.results)
+                    candidates.extend(cands)
+                    checked |= seen
+                except LLMError as exc:
+                    run.account(StageKey.CHECK, None, getattr(exc, "responses", None))
+                    fatal_from(exc)
+            check_ok = bool(checked)
+            counts["check"] = sum(1 for c in candidates if c.source == FindingSource.LLM)
+            not_checked = [x for x in reqs if x.id not in checked]
+            if check_ok:
+                n_check = sum(1 for c in candidates if c.source == FindingSource.LLM)
+                detail = (f"батчей: {len(batches)}, проверено требований: {len(checked)} из {len(reqs)}, "
+                          f"кандидатов: {n_check}")
+                run.emit(StageKey.CHECK, run.finished_state(StageKey.CHECK), detail)
+                if not_checked:
+                    run.warnings.append(f"Не проверено требований: {len(not_checked)} "
+                                        f"({', '.join(x.id for x in not_checked[:15])}).")
+            else:
+                reason = describe_error(failures[0]) if failures else \
+                    "модель не вернула результатов"
+                run.emit(StageKey.CHECK, StageState.FAILED, reason)
+                run.warnings.append(f"Проверка требований не выполнена: {reason}.")
 
         # set results
         set_failures = []
@@ -538,6 +611,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             run.warnings.append(f"Проверка набора выполнена не полностью ({lens}): {reason}.")
         # each stage shows the time of its own calls, not the wall time of the whole wave
         for key, secs in stage_seconds.items():
+            if answers_mode and key == StageKey.CHECK:
+                continue
             run.stages[key].seconds = round(secs, 2)
 
     derived: list[pp.Candidate] = []
@@ -554,11 +629,16 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     _soften_test_section_gaps(candidates, reqs)  # a merge may have brought back a higher severity
     stats.merged_before_review = stats.merged
     pp.assign_candidate_ids(candidates)
+    if answers_mode and previous_report is not None:
+        from validator.answers import annotate_candidates_with_previous_ids
+
+        annotate_candidates_with_previous_ids(candidates, previous_report.set_findings)
 
     # ---------------------------------------------------------- review
     fix_order: list[str] = []
     rationale = ""
     reviewed = False
+    closed_by_answer: dict[str, list[str]] = {}
     if not profile.review:
         run.emit(StageKey.REVIEW, StageState.SKIPPED, "не входит в профиль")
     elif fatal:
@@ -569,11 +649,25 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         run.emit(StageKey.REVIEW, StageState.RUNNING)
         try:
             cautious = exp.enabled("EXP_CAUTIOUS_CRITIC")
-            r = run_review(ctx, doc, pp.candidates_for_review(candidates), cautious=cautious)
+            r = run_review(
+                ctx,
+                doc,
+                pp.candidates_for_review(candidates),
+                cautious=cautious,
+                author_answers=answers_block,
+            )
             run.account(StageKey.REVIEW, r)
             review: LLMReview = r.data
             before = len(candidates)
-            candidates, outcome = pp.apply_review(candidates, review, builder, stats, cautious=cautious)
+            candidates, outcome = pp.apply_review(
+                candidates,
+                review,
+                builder,
+                stats,
+                cautious=cautious,
+                author_answers=author_answers if answers_mode else None,
+            )
+            closed_by_answer = outcome.closed_by_answer
             counts["review"] = len(outcome.missed)
             reviewed = True
             pp.clean_texts(candidates, builder)
@@ -611,6 +705,21 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                             dropped_unconfirmed=stats.dropped_unconfirmed)
     verdict = build_verdict(reqs, findings, set_findings, coverage, critic_order=critic_order, rationale=rationale,
                             run_status=_status(run, profile.review).value)
+    refinement: RefinementSummary | None = None
+    if answers_mode and previous_report is not None:
+        from validator.answers import build_refinement_summary
+
+        curr_lineage = {c.final_id: list(c.previous_ids) for c in candidates if c.final_id and c.previous_ids}
+        refinement = build_refinement_summary(
+            previous_report,
+            findings,
+            set_findings,
+            verdict,
+            author_answers,
+            curr_lineage=curr_lineage,
+            closed_by_review=closed_by_answer,
+            previous_report_name=previous_report_name,
+        )
     in_reqs = {b for r in reqs for b in r.block_ids}
     skipped_ids = {s.block_id for s in ext.skipped} - in_reqs
     structural = {b.id for b in doc.blocks if b.kind in (BlockKind.HEADING, BlockKind.TABLE_HEADER)}
@@ -642,7 +751,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     )
     return Report(run=info, requirements=reqs, skipped_blocks=ext.skipped, findings=findings,
                   set_findings=set_findings, coverage=coverage, questions=questions, summary=summary,
-                  verdict=verdict, debug=ReportDebug(critic_dropped=stats.drop_log))
+                  verdict=verdict, debug=ReportDebug(critic_dropped=stats.drop_log), refinement=refinement)
 
 
 def _status(run: _Run, review_in_profile: bool) -> RunStatus:
@@ -705,6 +814,10 @@ def _aggregate_gaps(builder: pp.CandidateBuilder, coverage: list[CoverageRow],
                        "для каждого из перечисленных требований.",
         question="Какие сценарии приёмки подтверждают выполнение перечисленных требований?",
         options=["Критерии приёмки будут добавлены в документ", "Сценарии будут описаны в тест-кейсах QA"],
+        option_consequences=[
+            f"Для требований {ids} в документ добавляются приёмочные сценарии; пробел покрытия закрывается.",
+            f"Для требований {ids} фиксируется ссылка на тест-кейсы QA; пробел покрытия в ТЗ снимается.",
+        ],
         requirement_ids=rest, source=FindingSource.RULE, set_check=SetCheck.ACCEPTANCE_GAP, confirmed=True,
         no_merge=True, addressee="qa",
     )]

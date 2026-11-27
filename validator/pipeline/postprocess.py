@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from validator.models import (
     SEVERITY_RANK,
+    AuthorAnswer,
     BlockKind,
     Criterion,
     Document,
@@ -367,6 +368,8 @@ class Candidate:
     keep: bool = False  # a deterministic fact (missing ids, ranking): the critic may not drop it as generic
     rule: str = ""
     related: list[str] = field(default_factory=list)
+    option_consequences: list[str] = field(default_factory=list)
+    previous_ids: list[str] = field(default_factory=list)
 
     @property
     def is_set(self) -> bool:
@@ -535,19 +538,21 @@ class CandidateBuilder:
                 crit = Criterion(f.criterion)
                 related = [r for r in (self.resolve_req(x) for x in f.related_requirement_ids) if r and r != frid]
                 sev = Severity(f.severity)
+                opts, cons = align_options_and_consequences(f.answer_options, f.option_consequences)
                 if crit == Criterion.SET_CONSISTENT and related:
                     evidence = [ev] + [self.requirement_evidence(r) for r in related[:2]]
                     out.append(Candidate(crit, sev, evidence, f.explanation.strip(), f.recommendation.strip(),
-                                         self._question(f.clarifying_question), distinct_options(f.answer_options),
+                                         self._question(f.clarifying_question), opts,
                                          [frid, *related], FindingSource.LLM, set_check=SetCheck.CONTRADICTION,
-                                         needs_confirmation=needs_conf, addressee=f.addressee))
+                                         needs_confirmation=needs_conf, addressee=f.addressee,
+                                         option_consequences=cons))
                     continue
                 if crit == Criterion.SET_CONSISTENT:
                     crit = Criterion.CORRECT
                 out.append(Candidate(crit, sev, [ev], f.explanation.strip(), f.recommendation.strip(),
-                                     self._question(f.clarifying_question), distinct_options(f.answer_options),
+                                     self._question(f.clarifying_question), opts,
                                      [frid], FindingSource.LLM, needs_confirmation=needs_conf,
-                                     addressee=f.addressee))
+                                     addressee=f.addressee, option_consequences=cons))
         return out, seen
 
     def from_set(self, findings: list[LLMSetFinding], source: FindingSource = FindingSource.LLM) -> list[Candidate]:
@@ -587,9 +592,11 @@ class CandidateBuilder:
             cross = len(parts) > 1
             if cross and check == SetCheck.CONTRADICTION:
                 check = SetCheck.CROSS_PART
+            opts, cons = align_options_and_consequences(f.answer_options, f.option_consequences)
             c = Candidate(crit, sev, evidence, explanation, f.recommendation.strip(),
-                          self._question(f.clarifying_question), distinct_options(f.answer_options), req_ids,
-                          source, set_check=check, scenario=f.scenario.strip(), addressee=f.addressee)
+                          self._question(f.clarifying_question), opts, req_ids,
+                          source, set_check=check, scenario=f.scenario.strip(), addressee=f.addressee,
+                          option_consequences=cons)
             out.append(c)
         return out
 
@@ -627,6 +634,32 @@ class CandidateBuilder:
         return out
 
 
+def candidates_from_previous_findings(findings: list[Finding]) -> list[Candidate]:
+    """Rebuild review candidates from a previous report's per-requirement findings."""
+    out: list[Candidate] = []
+    for f in findings:
+        out.append(Candidate(
+            criterion=f.criterion,
+            severity=f.severity,
+            evidence=[e.model_copy(deep=True) for e in f.evidence],
+            explanation=f.explanation,
+            recommendation=f.recommendation,
+            question=f.clarifying_question,
+            options=list(f.answer_options),
+            requirement_ids=list(f.requirement_ids),
+            source=f.source,
+            review_note=f.review_note,
+            confirmed=True,
+            addressee=f.addressee.value if f.addressee else "",
+            protected=f.source == FindingSource.RULE and f.severity == Severity.CRITICAL,
+            keep=f.source == FindingSource.RULE,
+            related=list(f.related_notes),
+            option_consequences=list(f.option_consequences),
+            previous_ids=[f.id],
+        ))
+    return out
+
+
 # ---------------------------------------------------------------- guards, dedup
 
 
@@ -636,16 +669,33 @@ def clean_texts(cands: list[Candidate], builder: CandidateBuilder) -> None:
         c.recommendation = builder.clean_text(c.recommendation)
         c.question = builder.clean_text(c.question)
         c.options = [builder.clean_text(o) for o in c.options]
+        c.option_consequences = [builder.clean_text(x) for x in c.option_consequences]
+
+
+def align_options_and_consequences(
+    options: list[str],
+    consequences: list[str] | None = None,
+    limit: int = 4,
+) -> tuple[list[str], list[str]]:
+    """Distinct answer options paired with their consequences; fewer than two options yield empty lists."""
+    cons_in = list(consequences or [])
+    out_opts: list[str] = []
+    out_cons: list[str] = []
+    for idx, raw_opt in enumerate(options):
+        opt = (raw_opt or "").strip()
+        if opt and all(normalize(opt) != normalize(x) and not quotes_overlap(opt, x, 0.85) for x in out_opts):
+            out_opts.append(opt)
+            raw_cons = cons_in[idx] if idx < len(cons_in) else ""
+            out_cons.append((raw_cons or "").strip())
+    if len(out_opts) < 2:
+        return [], []
+    return out_opts[:limit], out_cons[:limit]
 
 
 def distinct_options(options: list[str], limit: int = 4) -> list[str]:
     """Answer options that actually differ; fewer than two distinct options are no choice at all."""
-    out: list[str] = []
-    for o in options:
-        o = (o or "").strip()
-        if o and all(normalize(o) != normalize(x) and not quotes_overlap(o, x, 0.85) for x in out):
-            out.append(o)
-    return out[:limit] if len(out) >= 2 else []
+    opts, _ = align_options_and_consequences(options, None, limit)
+    return opts
 
 
 def _status_code_conflict(c: Candidate, parts: dict[str, str]) -> bool:
@@ -810,10 +860,14 @@ def merge_into(winner: Candidate, loser: Candidate) -> None:
                 winner.requirement_ids.append(r)
     if not winner.question and loser.question:
         winner.question = loser.question
-        winner.options = loser.options
+        winner.options = list(loser.options)
+        winner.option_consequences = list(loser.option_consequences)
     winner.confirmed = winner.confirmed or loser.confirmed
     winner.needs_confirmation = winner.needs_confirmation and loser.needs_confirmation
     winner.merged_from.append(loser.cid)
+    for pid in loser.previous_ids:
+        if pid not in winner.previous_ids:
+            winner.previous_ids.append(pid)
 
 
 def _priority(c: Candidate) -> tuple:
@@ -857,12 +911,39 @@ def candidates_for_review(cands: list[Candidate], limit_chars: int = 60000) -> s
 
         quotes = " || ".join(f"«{safe(e.quote[:200])}» [{e.quote_status.value}]" for e in c.evidence[:3])
         kind = c.set_check.value if c.set_check else "requirement"
+        prev_tag = f" | пред. ID: {','.join(c.previous_ids)}" if c.previous_ids else ""
         lines.append(
             f"{c.cid} | {','.join(c.requirement_ids) or '—'} | {kind} | {c.criterion.value} | {c.severity.value} | "
-            f"{quotes} | {safe(c.explanation[:400])} | вопрос: {safe(c.question[:200])}"
+            f"{quotes} | {safe(c.explanation[:400])} | вопрос: {safe(c.question[:200])}{prev_tag}"
         )
     text = "\n".join(lines)
     return text[:limit_chars]
+
+
+_QUESTION_ID_RE = re.compile(r"\bQ-\d{3}\b", re.IGNORECASE)
+
+
+def _matching_answer_ids(counter_quote: str, author_answers: list[AuthorAnswer]) -> list[str]:
+    """Return question IDs whose author answer is substantiated by `counter_quote`."""
+    raw = (counter_quote or "").strip()
+    if not raw or not author_answers:
+        return []
+    cq = normalize(raw)
+    explicit_qids = {m.upper() for m in _QUESTION_ID_RE.findall(raw)}
+    matched: list[str] = []
+    for ans in author_answers:
+        na = normalize(ans.answer)
+        if not na:
+            continue
+        if (
+            ans.question_id.upper() in explicit_qids
+            or cq == na
+            or (len(cq) >= 6 and cq in na)
+            or (len(na) >= 4 and na in cq)
+            or quotes_overlap(raw, ans.answer, 0.55)
+        ) and ans.question_id not in matched:
+            matched.append(ans.question_id)
+    return matched
 
 
 @dataclass
@@ -870,27 +951,32 @@ class ReviewOutcome:
     fix_first: list[str]
     rationale: str
     missed: list[Candidate]
+    closed_by_answer: dict[str, list[str]] = field(default_factory=dict)
 
 
 def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBuilder,
-                 stats: Stats, *, cautious: bool = False) -> tuple[list[Candidate], ReviewOutcome]:
+                 stats: Stats, *, cautious: bool = False,
+                 author_answers: list[AuthorAnswer] | None = None) -> tuple[list[Candidate], ReviewOutcome]:
     """`cautious`: only proven errors are removed, rule findings are untouched, only exact duplicates merge,
     and a candidate the critic did not decide on is kept."""
     by_id = {c.cid: c for c in cands}
     dropped: set[str] = set()
+    closed_by_answer: dict[str, list[str]] = {}
+    answers = author_answers or []
     for d in review.decisions:
         c = by_id.get(d.finding_id.strip())
         if c is None or c.cid in dropped:
             continue
         verdict = d.verdict
+        matched_qids = _matching_answer_ids(d.counter_quote, answers)
         if cautious:
-            if c.source == FindingSource.RULE:
+            if c.source == FindingSource.RULE and not matched_qids:
                 c.confirmed = True
                 continue
             if verdict == "drop" and d.drop_reason in ("generic", "out_of_scope"):
                 c.confirmed = True  # an opinion, not a proof: kept as it is
                 continue
-            if verdict == "drop" and d.drop_reason == "document_specifies":
+            if verdict == "drop" and d.drop_reason == "document_specifies" and not matched_qids:
                 m = builder.index.find(d.counter_quote) if d.counter_quote.strip() else None
                 if m is None or m.status != QuoteStatus.VERIFIED:
                     c.confirmed = True
@@ -901,13 +987,13 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                     c.confirmed = True  # not an exact duplicate: two findings
                     continue
         lowers = SEVERITY_RANK[Severity(d.severity)] > SEVERITY_RANK[c.severity]
-        if c.protected and (verdict != "keep" or lowers):
+        if c.protected and (verdict != "keep" or lowers) and not matched_qids:
             c.confirmed = True  # a rule-fixed critical gap is neither dropped nor lowered by the critic
             continue
         if verdict == "keep":
             c.confirmed = True
             new_sev = Severity(d.severity)
-            if not (c.two_quote_contradiction and lowers):
+            if not (c.two_quote_contradiction and lowers and not matched_qids):
                 c.severity = new_sev
         elif verdict in ("merge",) or d.drop_reason == "duplicate":
             target = by_id.get(d.merge_into.strip())
@@ -938,11 +1024,29 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
             dropped.add(c.cid)
             stats.merged += 1
         elif verdict == "drop":
-            if d.drop_reason == "document_specifies":
-                if d.counter_quote.strip() and builder.index.find(d.counter_quote) is not None:
+            if d.drop_reason == "answered":
+                if matched_qids:
+                    log_drop(stats, c, "review", "answered", counter_quote=d.counter_quote)
+                    dropped.add(c.cid)
+                    stats.dropped_by_review += 1
+                    for pid in c.previous_ids:
+                        closed_by_answer[pid] = list(matched_qids)
+                else:
+                    c.review_note = (
+                        "критик предложил удалить со ссылкой на ответ автора без подтверждающего фрагмента; "
+                        "находка оставлена"
+                    )
+            elif d.drop_reason == "document_specifies":
+                in_doc = bool(d.counter_quote.strip()) and builder.index is not None and (
+                    builder.index.find(d.counter_quote) is not None
+                )
+                if in_doc or matched_qids:
                     log_drop(stats, c, "review", "document_specifies", counter_quote=d.counter_quote)
                     dropped.add(c.cid)
                     stats.dropped_by_review += 1
+                    if matched_qids:
+                        for pid in c.previous_ids:
+                            closed_by_answer[pid] = list(matched_qids)
                 else:
                     # unproven drop: the finding stays, but an anchored one is not confirmed by it
                     c.review_note = "критик предложил удалить без подтверждающей цитаты; находка оставлена"
@@ -967,6 +1071,7 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
             # yes/no options do not fit a rewritten open question
             if _OPEN_QUESTION.match(c.question) and any(_YES_NO.match(o) for o in c.options):
                 c.options = []
+                c.option_consequences = []
     kept = [c for c in cands if c.cid not in dropped]
     if cautious:
         for c in kept:
@@ -978,7 +1083,7 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
     for m in missed:
         m.confirmed = True
     fix = [x.strip() for x in review.fix_first if x.strip() in by_id and x.strip() not in dropped]
-    return kept, ReviewOutcome(fix[:7], review.verdict_rationale.strip(), missed)
+    return kept, ReviewOutcome(fix[:7], review.verdict_rationale.strip(), missed, closed_by_answer)
 
 
 _FOLD_CODE = re.compile(r"(?<![\d.,])([1-5]\d\d)(?!\d)")
@@ -1038,6 +1143,9 @@ def fold_rule_twins(cands: list[Candidate]) -> tuple[list[Candidate], int]:
         for r in twin.requirement_ids:
             if r not in rule.requirement_ids:
                 rule.requirement_ids.append(r)
+        for pid in twin.previous_ids:
+            if pid not in rule.previous_ids:
+                rule.previous_ids.append(pid)
         if twin.set_check is not None and rule.set_check is None:
             rule.set_check = twin.set_check
         rule.confirmed = True
@@ -1104,19 +1212,150 @@ RULE_OPTIONS: dict[str, list[str]] = {
     "one_line_process": ["Описать участников, шаги и ветки отказов в отдельной схеме процесса",
                          "Схема иллюстративная: сослаться на функциональные требования как на основной источник"],
 }
+RULE_OPTION_CONSEQUENCES: dict[str, list[str]] = {
+    "placeholder": [
+        "Заглушка в {loc} заменяется конкретным значением; пробел полноты закрывается.",
+        "В {loc} фиксируется пометка «не применимо» с причиной; замечание о заглушке снимается.",
+    ],
+    "empty_cell": [
+        "Пустые ячейки таблицы в {loc} заполняются фактическими значениями; пробел полноты снимается.",
+        "Лишняя строка таблицы в {loc} удаляется; замечание о пустых ячейках закрывается.",
+    ],
+    "empty_section": [
+        "В {loc} добавляются недостающие требования или данные; дефект пустого раздела закрывается.",
+        "Раздел исключается или помечается как неприменимый с пояснением; замечание по {dat} снимается.",
+    ],
+    "unfilled_template_table": [
+        "В таблице {gen} проставляются фактические отметки вместо шаблона; замечание закрывается.",
+        "Неиспользуемый шаблонный чек-лист удаляется из {gen}; замечание снимается.",
+    ],
+    "missing_req_ids": [
+        "Всем требованиям документа присваиваются уникальные ID; замечание по трассируемости закрывается.",
+        "Нумерация вводится для функциональных требований и критериев приёмки; базовые связи трассируются.",
+    ],
+    "no_ranking": [
+        "Каждому требованию назначается приоритет; замечание по ранжированию снимается.",
+        "В документе фиксируется, что все требования обязательны; замечание по ранжированию закрывается.",
+    ],
+    "duplicate_id": [
+        "Повторяющиеся идентификаторы в {loc} получают уникальные номера; конфликт трассируемости снимается.",
+        "Дублирующиеся записи в {loc} объединяются в одно требование; дублирование ID закрывается.",
+    ],
+    "numbering_gap": [
+        "В {loc} фиксируется намеренный пропуск номера; замечание о нарушении нумерации снимается.",
+        "Потерянное требование восстанавливается в {loc}; разрыв нумерации закрывается.",
+    ],
+    "dangling_reference": [
+        "Отсутствующий раздел или требование добавляется в документ; битая ссылка из {gen} закрывается.",
+        "Ссылка в {loc} исправляется на существующий пункт; замечание по трассируемости снимается.",
+    ],
+    "api_get_write_side_effect": [
+        "Метод в {loc} меняется на POST/PUT с параметрами в теле запроса; нарушение семантики HTTP закрывается.",
+        "Метод GET в {loc} сохраняется с явным обоснованием; замечание переводится в принятое ограничение.",
+    ],
+    "api_status_code_conflict": [
+        "Текст подраздела в {loc} приводится к коду из перечня статусов; противоречие кодов закрывается.",
+        "Код из подраздела добавляется в перечень статусов в {loc}; противоречие кодов снимается.",
+    ],
+    "api_undeclared_status_code": [
+        "Необъявленный код добавляется в перечень статусов {gen} с описанием и примером; расхождение закрывается.",
+        "Упоминание кода в {loc} заменяется на один из объявленных статусов; расхождение снимается.",
+    ],
+    "api_success_code_error_body": [
+        "Ошибки в {loc} переносятся на код ошибки с единым телом; противоречие статусов закрывается.",
+        "Перечень статусов в {loc} обновляется под код успеха с признаком ошибки; противоречие снимается.",
+    ],
+    "api_status_heading_mismatch": [
+        "Заголовок подраздела в {loc} приводится к описанному коду ответа; неоднозначность снимается.",
+        "Описание и пример в {loc} приводятся к коду из заголовка; неоднозначность закрывается.",
+    ],
+    "api_req_resp_type_mismatch": [
+        "Тип поля в запросе и ответе {gen} унифицируется; противоречие типов данных закрывается.",
+        "В {loc} документируется правило преобразования типа поля; расхождение снимается.",
+    ],
+    "api_body_content_type_unused": [
+        "Избыточный заголовок Content-Type удаляется из {gen}; расхождение описания закрывается.",
+        "В {loc} добавляется описание тела запроса под указанный Content-Type; противоречие снимается.",
+    ],
+    "api_get_with_body": [
+        "Тело запроса убирается из GET в {loc} с переносом параметров в query/path; дефект закрывается.",
+        "Метод в {loc} меняется на POST или PUT под описанное тело запроса; нарушение снимается.",
+    ],
+    "units_mismatch": [
+        "Для {gen} закрепляется единая единица измерения во всех разделах; конфликт единиц закрывается.",
+        "В {loc} добавляются коэффициент пересчёта и правило округления; противоречие единиц снимается.",
+    ],
+    "idempotency_without_key": [
+        "В {loc} фиксируются ключ дедупликации и окно его хранения; пробел идемпотентности закрывается.",
+        "В {loc} фиксируется гарантия однократной доставки от источника; замечание по дедупликации снимается.",
+    ],
+    "flag_with_mandatory_params": [
+        "В {loc} уточняется, что при выключенном флаге параметры необязательны и не проверяются; пробел закрывается.",
+        "В {loc} описывается обработка обязательных параметров при выключенном флаге; пробел сценария снимается.",
+    ],
+    "one_line_process": [
+        "Схема процесса в {loc} дополняется ветками отказов и альтернативными исходами; пробел закрывается.",
+        "В {loc} фиксируется обзорный статус схемы со ссылкой на функциональные правила; замечание снимается.",
+    ],
+}
+_TEST_STUB_CONSEQUENCES = [
+    "В {loc} добавляются тестовые сценарии до начала разработки; пробел по тестированию закрывается.",
+    "В {loc} добавляется ссылка на отдельный документ QA; пробел по тестированию снимается.",
+]
 # who answers questions of the deterministic gap rules
 RULE_ADDRESSEE = {"units_mismatch": "analyst", "idempotency_without_key": "architect",
                   "flag_with_mandatory_params": "analyst", "one_line_process": "business"}
-def rule_options(c: Candidate) -> list[str]:
+
+
+def _target_forms(c: Candidate) -> dict[str, str]:
+    if c.requirement_ids:
+        if len(c.requirement_ids) == 1:
+            rid = c.requirement_ids[0]
+            return {"loc": f"требовании {rid}", "gen": f"требования {rid}", "dat": f"требованию {rid}"}
+        rids = ", ".join(c.requirement_ids[:3])
+        return {"loc": f"требованиях {rids}", "gen": f"требований {rids}", "dat": f"требованиям {rids}"}
+    if c.evidence and c.evidence[0].section and c.evidence[0].section != "—":
+        sec = c.evidence[0].section
+        return {"loc": f"разделе «{sec}»", "gen": f"раздела «{sec}»", "dat": f"разделу «{sec}»"}
+    return {"loc": "документе", "gen": "документа", "dat": "документу"}
+
+
+def rule_options_with_consequences(c: Candidate) -> tuple[list[str], list[str]]:
     where = " ".join([c.explanation, *(e.section for e in c.evidence)])
+    forms = _target_forms(c)
     if c.rule in ("placeholder", "empty_section") and re.search(r"тестир", where, re.IGNORECASE):
-        return ["Тестовые сценарии будут описаны в документе до начала разработки",
+        opts = ["Тестовые сценарии будут описаны в документе до начала разработки",
                 "Тестирование ведётся по отдельному документу QA: дать ссылку на него"]
+        cons = [t.format(**forms) for t in _TEST_STUB_CONSEQUENCES]
+        return opts, cons
     if c.rule in RULE_OPTIONS:
-        return list(RULE_OPTIONS[c.rule])
+        opts = list(RULE_OPTIONS[c.rule])
+        cons = [t.format(**forms) for t in RULE_OPTION_CONSEQUENCES.get(c.rule, [])]
+        return opts, cons
     if c.set_check == SetCheck.EMPTY_SECTION:
-        return list(RULE_OPTIONS["empty_section"])
-    return []
+        opts = list(RULE_OPTIONS["empty_section"])
+        cons = [t.format(**forms) for t in RULE_OPTION_CONSEQUENCES["empty_section"]]
+        return opts, cons
+    return [], []
+
+
+def rule_options(c: Candidate) -> list[str]:
+    return rule_options_with_consequences(c)[0]
+
+
+def fill_missing_consequences(c: Candidate) -> list[str]:
+    """Ensure every answer option has a short non-empty consequence aligned by index."""
+    if not c.options:
+        return []
+    loc = _target_forms(c)["loc"]
+    out: list[str] = []
+    for idx, opt in enumerate(c.options):
+        existing = c.option_consequences[idx].strip() if idx < len(c.option_consequences) else ""
+        if existing:
+            out.append(existing)
+        else:
+            out.append(f"Фиксирует вариант «{short_text(opt, 70)}» в {loc} и снимает связанный дефект.")
+    return out
 
 
 def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
@@ -1191,9 +1430,11 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             c.requirement_ids = []
             c.evidence = [e.model_copy(update={"requirement_id": None}) for e in c.evidence]
         c.addressee = infer_addressee(c, req_map)
-        c.options = distinct_options(c.options)
+        c.options, c.option_consequences = align_options_and_consequences(c.options, c.option_consequences)
         if not c.options and c.source == FindingSource.RULE:
-            c.options = rule_options(c)
+            c.options, c.option_consequences = rule_options_with_consequences(c)
+        if c.options:
+            c.option_consequences = fill_missing_consequences(c)
 
     def req_pos(c: Candidate) -> int:
         return min((order.get(r, 10**6) for r in c.requirement_ids), default=10**6)
@@ -1210,7 +1451,8 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
         findings.append(Finding(
             id=c.final_id, criterion=c.criterion, severity=c.severity, defect_class=defect_class_for(c.criterion),
             evidence=c.evidence, explanation=c.explanation, recommendation=c.recommendation,
-            clarifying_question=c.question, answer_options=c.options, source=c.source, review_note=c.review_note,
+            clarifying_question=c.question, answer_options=c.options, option_consequences=c.option_consequences,
+            source=c.source, review_note=c.review_note,
             requirement_ids=c.requirement_ids, addressee=c.addressee, related_notes=c.related,
         ))
     for i, c in enumerate(sets, 1):
@@ -1221,6 +1463,7 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             id=c.final_id, criterion=c.criterion, severity=c.severity,
             defect_class=defect_class_for(c.criterion, check), evidence=c.evidence, explanation=c.explanation,
             recommendation=c.recommendation, clarifying_question=c.question, answer_options=c.options,
+            option_consequences=c.option_consequences,
             source=c.source, review_note=c.review_note, set_check=check, requirement_ids=c.requirement_ids,
             cross_part=check == SetCheck.CROSS_PART or len(parts) > 1, addressee=c.addressee,
             related_notes=c.related,

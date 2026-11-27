@@ -1169,6 +1169,12 @@ body {
   font-size: 0.8125rem;
 }
 
+.option-consequence {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 /* Tables */
 .table-wrap {
   width: 100%;

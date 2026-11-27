@@ -146,6 +146,14 @@ class Addressee(StrEnum):
     QA = "qa"
 
 
+class FindingDeltaStatus(StrEnum):
+    """How a previous finding changed after applying author answers."""
+
+    CLOSED = "closed"
+    REMAINED = "remained"
+    CHANGED = "changed"
+
+
 _CONTRADICTORY_CHECKS = {SetCheck.CONTRADICTION, SetCheck.CROSS_PART, SetCheck.ACCEPTANCE_MISMATCH}
 _INCOMPLETE_CHECKS = {SetCheck.MISSING_REQUIREMENT, SetCheck.MISSING_SCENARIO, SetCheck.EMPTY_SECTION,
                       SetCheck.ACCEPTANCE_GAP}
@@ -262,6 +270,7 @@ class BaseFinding(BaseModel):
     recommendation: str
     clarifying_question: str
     answer_options: list[str] = Field(default_factory=list)
+    option_consequences: list[str] = Field(default_factory=list)
     source: FindingSource
     review_note: str | None = None
     addressee: Addressee | None = None
@@ -295,6 +304,7 @@ class Question(BaseModel):
     id: str
     text: str
     options: list[str] = Field(default_factory=list)
+    option_consequences: list[str] = Field(default_factory=list)
     finding_ids: list[str]
     requirement_ids: list[str] = Field(default_factory=list)
     section: str
@@ -407,6 +417,53 @@ class ReportDebug(BaseModel):
     critic_dropped: list[DroppedCandidate] = Field(default_factory=list)
 
 
+class AuthorAnswer(BaseModel):
+    question_id: str
+    question_text: str = ""
+    answer: str
+    finding_ids: list[str] = Field(default_factory=list)
+    requirement_ids: list[str] = Field(default_factory=list)
+
+
+class FindingDelta(BaseModel):
+    previous_id: str
+    status: FindingDeltaStatus
+    previous_severity: Severity
+    current_id: str | None = None
+    current_severity: Severity | None = None
+    summary: str = ""
+    answered_by: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class QuestionEffectRow(BaseModel):
+    question_id: str
+    question_text: str
+    answer: str
+    finding_ids: list[str] = Field(default_factory=list)
+    closed_ids: list[str] = Field(default_factory=list)
+    changed_ids: list[str] = Field(default_factory=list)
+    remained_ids: list[str] = Field(default_factory=list)
+    effect: str
+
+
+class RefinementSummary(BaseModel):
+    previous_report_name: str = ""
+    answers_total: int = 0
+    previous_findings_by_severity: dict[str, int] = Field(default_factory=dict)
+    current_findings_by_severity: dict[str, int] = Field(default_factory=dict)
+    previous_findings_total: int = 0
+    current_findings_total: int = 0
+    previous_verdict_development: Readiness
+    previous_verdict_testing: Readiness
+    current_verdict_development: Readiness
+    current_verdict_testing: Readiness
+    previous_verdict_headline: str = ""
+    current_verdict_headline: str = ""
+    finding_deltas: list[FindingDelta] = Field(default_factory=list)
+    question_effects: list[QuestionEffectRow] = Field(default_factory=list)
+
+
 class Report(BaseModel):
     schema_version: str = SCHEMA_VERSION
     run: RunInfo
@@ -419,6 +476,7 @@ class Report(BaseModel):
     summary: Summary
     verdict: Verdict
     debug: ReportDebug | None = None  # analysis data, not part of the rendered report
+    refinement: RefinementSummary | None = None
 
 
 # ---------------------------------------------------------------- exchange between modules

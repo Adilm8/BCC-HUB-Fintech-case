@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 KindLit = Literal["functional", "nonfunctional", "data", "interface", "integration", "ui", "business_goal",
                   "process", "constraint", "acceptance_criterion", "other"]
@@ -45,6 +45,7 @@ class LLMReqFinding(BaseModel):
     clarifying_question: str
     addressee: AddresseeLit = "analyst"  # who can answer the question
     answer_options: list[str]
+    option_consequences: list[str] = Field(default_factory=list)
     related_requirement_ids: list[str]
 
 
@@ -74,6 +75,7 @@ class LLMSetFinding(BaseModel):
     clarifying_question: str
     addressee: AddresseeLit = "analyst"  # who can answer the question
     answer_options: list[str]
+    option_consequences: list[str] = Field(default_factory=list)
 
 
 class LLMCoverage(BaseModel):
@@ -121,7 +123,7 @@ class LLMDecision(BaseModel):
     verdict: Literal["keep", "drop", "merge"]
     merge_into: str
     severity: SeverityLit
-    drop_reason: Literal["none", "document_specifies", "generic", "duplicate", "out_of_scope"]
+    drop_reason: Literal["none", "document_specifies", "answered", "generic", "duplicate", "out_of_scope"]
     counter_quote: str
     improved_question: str
 

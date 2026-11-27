@@ -84,11 +84,16 @@ def build_questions(findings: list[Finding], set_findings: list[SetFinding]) -> 
             q.requirement_ids.extend(r for r in f.requirement_ids if r not in q.requirement_ids)
             if not q.options and f.answer_options:
                 q.options = list(f.answer_options)
+                q.option_consequences = list(f.option_consequences[: len(q.options)])
+            elif q.options and not q.option_consequences and f.option_consequences:
+                q.option_consequences = list(f.option_consequences[: len(q.options)])
             continue
         if len(out) >= MAX_QUESTIONS:
             continue
-        q = Question(id=f"Q-{len(out) + 1:03d}", text=text, options=list(f.answer_options), finding_ids=[f.id],
-                     requirement_ids=list(f.requirement_ids), section=f.section,
+        opts = list(f.answer_options)
+        cons = list(f.option_consequences[: len(opts)]) if opts else []
+        q = Question(id=f"Q-{len(out) + 1:03d}", text=text, options=opts, option_consequences=cons,
+                     finding_ids=[f.id], requirement_ids=list(f.requirement_ids), section=f.section,
                      blocking=f.severity == Severity.CRITICAL, addressee=f.addressee)
         classes[q.id] = f.defect_class
         places[q.id] = set(blocks)

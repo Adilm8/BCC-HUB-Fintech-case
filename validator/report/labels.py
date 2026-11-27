@@ -8,6 +8,7 @@ from validator.models import (
     BlockKind,
     Criterion,
     DefectClass,
+    FindingDeltaStatus,
     FindingSource,
     QuoteStatus,
     Readiness,
@@ -456,6 +457,12 @@ def set_check_label(set_check: SetCheck | str) -> str:
         return str(set_check)
 
 
+FINDING_DELTA_STATUS_LABELS: dict[FindingDeltaStatus, str] = {
+    FindingDeltaStatus.CLOSED: "закрыто ответом",
+    FindingDeltaStatus.REMAINED: "осталось",
+    FindingDeltaStatus.CHANGED: "изменилось",
+}
+
 ADDRESSEE_LABELS: dict[str, str] = {
     "business": "Бизнес / Product Owner",
     "analyst": "Системный аналитик / API",
@@ -463,6 +470,14 @@ ADDRESSEE_LABELS: dict[str, str] = {
     "security": "Информационная безопасность",
     "qa": "QA",
 }
+
+
+def finding_delta_status_label(status: FindingDeltaStatus | str) -> str:
+    """Return Russian label for a previous-finding delta status."""
+    try:
+        return FINDING_DELTA_STATUS_LABELS[FindingDeltaStatus(status)]
+    except ValueError:
+        return str(status)
 
 
 def addressee_label(addressee: object) -> str:
