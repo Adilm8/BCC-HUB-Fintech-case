@@ -454,9 +454,100 @@ class DisabledClient(LLMClient):
         raise LLMError("запуск в режиме только правил", "disabled")
 
 
+class OpenRouterError(RuntimeError):
+    """An HTTP error answer: carries the status and headers for classify_error and retry_after_seconds."""
+
+    def __init__(self, message: str, status_code: int, headers: dict[str, str]):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response = type("Response", (), {"headers": headers})()
+
+
+class OpenRouterClient(LLMClient):
+    """OpenAI-compatible Chat Completions on openrouter.ai; standard library only."""
+
+    provider = "openrouter"
+    URL = "https://openrouter.ai/api/v1/chat/completions"
+
+    def __init__(self, settings: Settings):
+        super().__init__(settings)
+        self._native_schema = True  # switched off once if a model rejects response_format
+
+    def _post(self, body: dict, timeout: float) -> tuple[int, dict[str, str], bytes]:
+        """One HTTP request; replaced in tests."""
+        import urllib.error
+        import urllib.request
+
+        req = urllib.request.Request(self.URL, data=json.dumps(body).encode("utf-8"), method="POST", headers={
+            "Authorization": f"Bearer {self._settings.api_key}", "Content-Type": "application/json",
+            "X-Title": "requirements-validator"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # a fixed https URL
+                return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, {k.lower(): v for k, v in (exc.headers or {}).items()}, exc.read() or b""
+
+    def _call(self, model, prompt, *, system, json_schema, temperature, effort, max_output_tokens, timeout):
+        use_native = bool(json_schema) and self._native_schema
+        try:
+            return self._request(model, prompt, system, json_schema if use_native else None,
+                                 json_schema if not use_native else None, temperature, effort, max_output_tokens,
+                                 timeout)
+        except OpenRouterError as exc:
+            if use_native and exc.status_code == 400:
+                self._native_schema = False  # the schema goes into the prompt from now on
+                return self._request(model, prompt, system, None, json_schema, temperature, effort,
+                                     max_output_tokens, timeout)
+            raise
+
+    def _request(self, model, prompt, system, native_schema, prompt_schema, temperature, effort, max_output_tokens,
+                 timeout) -> LLMResponse:
+        if prompt_schema:
+            prompt += ("\n\nОтветь только JSON-объектом без пояснений и без markdown, по схеме:\n"
+                       + json.dumps(prompt_schema, ensure_ascii=False))
+        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+        body: dict = {"model": model, "messages": messages, "max_tokens": max_output_tokens}
+        if effort:
+            body["reasoning"] = {"effort": {"minimal": "low"}.get(effort, effort)}
+        if temperature is not None:
+            body["temperature"] = temperature
+        if native_schema:
+            body["response_format"] = {"type": "json_schema",
+                                       "json_schema": {"name": "out", "strict": False, "schema": native_schema}}
+        status, headers, raw = self._post(body, timeout)
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        err = data.get("error")
+        if status >= 400 or err:
+            # an upstream failure may also come as status 200 with an error object
+            err = err if isinstance(err, dict) else {}
+            code = status if status >= 400 else (int(err["code"]) if str(err.get("code", "")).isdigit() else 500)
+            text = f"{code} {err.get('message') or raw[:200].decode('utf-8', 'replace')}"
+            if code == 402:
+                # no credits: another attempt or model will not help within this run
+                raise LLMError(f"на счёте OpenRouter недостаточно кредитов: {short_error(RuntimeError(text))}",
+                               "quota_daily")
+            raise OpenRouterError(text, code, headers)
+        choice = (data.get("choices") or [{}])[0]
+        content = (choice.get("message") or {}).get("content") or ""
+        if isinstance(content, list):  # some models answer with content parts
+            content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+        usage = data.get("usage") or {}
+        # the requested name, not the routed variant: cache keys and fallbacks compare by it
+        return LLMResponse(text=content, model=model,
+                           input_tokens=usage.get("prompt_tokens"), output_tokens=usage.get("completion_tokens"),
+                           truncated=choice.get("finish_reason") == "length")
+
+
 def make_client(settings: Settings) -> LLMClient:
     if settings.provider == "anthropic":
         return AnthropicClient(settings)
+    if settings.provider == "openrouter":
+        return OpenRouterClient(settings)
     extra = extra_provider_module()
     if extra is not None and settings.provider == getattr(extra, "NAME", None):
         return extra.make_client(settings)

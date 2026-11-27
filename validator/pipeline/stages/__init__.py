@@ -61,7 +61,7 @@ class StageContext:
         # temperatures: send (and hash) none for them
         provider = family(getattr(self.client, "provider", ""))
         model = self.model(stage) or getattr(self.client, "model", "") or ""
-        if provider != "gemini" or model.startswith("gemini-3"):
+        if provider != "gemini" or model.rsplit("/", 1)[-1].startswith("gemini-3"):
             return None
         return TEMPERATURE.get(stage)
 

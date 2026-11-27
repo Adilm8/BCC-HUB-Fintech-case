@@ -1,12 +1,17 @@
 {
   "version": 1,
-  "provider": "gemini",
-  "family": "gemini",
-  "model": "gemini-3.5-flash",
-  "fallback_models": [
-    "gemini-3.5-flash-lite"
-  ],
+  "provider": "anthropic",
+  "family": "anthropic",
+  "model": "claude-sonnet-5-5",
+  "fallback_models": [],
   "profile": "standard",
   "max_context_chars": 120000,
-  "env": {}
+  "domain": "",
+  "env": {
+    "EXP_BOUNDARY_RULE": "1",
+    "EXP_COMPLETENESS_ITEMS": "1",
+    "EXP_DOMAIN": "1",
+    "EXP_GLOSSARY": "1",
+    "EXP_STATES": "1"
+  }
 }

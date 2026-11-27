@@ -7,22 +7,24 @@ PROVIDERS = {
     # provider: (key variable, model variable, default model, fallback variable)
     "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL", "gemini-3.5-flash", "GEMINI_FALLBACK_MODELS"),
     "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "claude-sonnet-5-5", "ANTHROPIC_FALLBACK_MODELS"),
+    "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", "google/gemini-3.8-flash", "OPENROUTER_FALLBACK_MODELS"),
 }
 # fallback models used when the environment does not name any
 DEFAULT_FALLBACKS: dict[str, tuple[str, ...]] = {"gemini": ("gemini-3.5-flash-lite",)}
 # list price in USD per 1M tokens (input, output) for the run passport's cost estimate
-MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {"claude-sonnet-5-5": (2.0, 10.0)}
+MODEL_PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {"claude-sonnet-5-5": (2.0, 10.0),
+                                                              "google/gemini-3.8-flash": (0.75, 3.75)}
 # providers whose models are used on a free tier by default
 FREE_TIER_FAMILIES = {"gemini"}
 # providers that answer one call at a time
-SEQUENTIAL_PROVIDERS = {"gemini"}
-# a provider added through the extension hook behaves like one of the built-in ones
-PROVIDER_FAMILY: dict[str, str] = {}
+SEQUENTIAL_PROVIDERS = {"gemini", "openrouter"}
+# a provider that behaves like one of the built-in ones (scheduling, profile, sampling); the extension hook adds more
+PROVIDER_FAMILY: dict[str, str] = {"openrouter": "gemini"}
 
-DEFAULT_PROFILE = {"gemini": "standard", "anthropic": "standard"}
-DEFAULT_TIMEOUT = {"gemini": 240.0, "anthropic": 300.0}  # one attempt, seconds
+DEFAULT_PROFILE = {"gemini": "standard", "anthropic": "standard", "openrouter": "standard"}
+DEFAULT_TIMEOUT = {"gemini": 240.0, "anthropic": 300.0, "openrouter": 240.0}  # one attempt, seconds
 # the free tier answers slower and runs calls one by one: it needs a longer run
-DEFAULT_DEADLINE = {"gemini": 900.0, "anthropic": 480.0}
+DEFAULT_DEADLINE = {"gemini": 900.0, "anthropic": 480.0, "openrouter": 900.0}
 
 
 def family(provider: str) -> str:
@@ -190,6 +192,6 @@ def estimate_cost(tokens_by_model: dict[str, tuple[int, int]], provider: str) ->
         prices = "; ".join(f"{m}: ${MODEL_PRICES_USD_PER_MTOK[m][0]:g} / ${MODEL_PRICES_USD_PER_MTOK[m][1]:g} "
                            "за 1 млн токенов (вход / выход)" for m in used)
         return round(cost, 4), f"оценка по прайс-листу ({prices})"
-    if family(provider) in FREE_TIER_FAMILIES:
+    if provider in FREE_TIER_FAMILIES:
         return None, "бесплатный тариф; на платном ключе — по прайс-листу провайдера"
     return None, "цена модели неизвестна"

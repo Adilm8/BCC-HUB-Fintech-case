@@ -1,0 +1,3662 @@
+{
+  "schema_version": "1.0",
+  "run": {
+    "document_title": "Уведомление о расходах по карте",
+    "document_name": "requirements.md",
+    "document_format": "md",
+    "document_sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
+    "started_at": "2026-11-27T20:53:17.244582+05:00",
+    "finished_at": "2026-11-27T20:54:27.321210+05:00",
+    "duration_seconds": 70.08,
+    "provider": "gemini",
+    "models_used": [
+      "gemini-3.5-flash-lite"
+    ],
+    "agent_version": "0.1.0 (c4f693e)",
+    "profile": "standard",
+    "llm_calls": 3,
+    "input_tokens": 42941,
+    "output_tokens": 10677,
+    "cost_usd": null,
+    "cost_note": "бесплатный тариф; на платном ключе — по прайс-листу провайдера",
+    "status": "complete",
+    "stages": [
+      {
+        "key": "load",
+        "title": "Чтение документа",
+        "state": "done",
+        "detail": "формат md, 8445 символов",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.02
+      },
+      {
+        "key": "structure",
+        "title": "Разбор структуры",
+        "state": "done",
+        "detail": "разделов: 34, блоков: 90",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.01
+      },
+      {
+        "key": "prechecks",
+        "title": "Проверки по правилам",
+        "state": "done",
+        "detail": "находок: 21, подсказок: 1, инвентарь: 58",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.12
+      },
+      {
+        "key": "extract",
+        "title": "Нарезка требований",
+        "state": "cached",
+        "detail": "из предыдущего отчёта (требований: 38, служебных блоков: 37)",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.0
+      },
+      {
+        "key": "check",
+        "title": "Проверка каждого требования",
+        "state": "cached",
+        "detail": "из предыдущего отчёта (проверено требований: 38 из 38, находок: 11)",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.0
+      },
+      {
+        "key": "set_check",
+        "title": "Проверка набора требований",
+        "state": "done",
+        "detail": "вызовов: 2, кандидатов: 14",
+        "model": "gemini-3.5-flash-lite",
+        "llm_calls": 2,
+        "input_tokens": 27658,
+        "output_tokens": 6902,
+        "seconds": 60.62
+      },
+      {
+        "key": "review",
+        "title": "Критический пересмотр",
+        "state": "done",
+        "detail": "на пересмотр: 40 из 47 кандидатов, осталось: 27 (подробный баланс — в приложении)",
+        "model": "gemini-3.5-flash-lite",
+        "llm_calls": 1,
+        "input_tokens": 15283,
+        "output_tokens": 3775,
+        "seconds": 7.57
+      },
+      {
+        "key": "assemble",
+        "title": "Сборка отчёта",
+        "state": "done",
+        "detail": "нарушений: 27, вопросов: 20",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.15
+      }
+    ],
+    "standards": [
+      "ISO/IEC/IEEE 29148:2018",
+      "IEEE 830-1998"
+    ],
+    "warnings": [
+      "Доменный профиль banking выбран автоматически: основ найдено 9, вхождений 44.",
+      "Проверка набора требований: gemini-3.5-flash: сервис модели перегружен или недоступен (попытка 1, 2 с от начала вызова); gemini-3.5-flash: дневная квота модели исчерпана (попытка 2, 11 с от начала вызова); переход на запасную модель gemini-3.5-flash-lite."
+    ]
+  },
+  "requirements": [
+    {
+      "id": "R-001",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "business_goal",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Цели",
+      "block_ids": [
+        "B010"
+      ],
+      "title": "Информирование о достижении личного бюджета при покупке",
+      "quote": "Дать клиенту возможность узнать о достижении личного бюджета в момент покупки.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-002",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "process",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Архитектура решения",
+      "block_ids": [
+        "B011"
+      ],
+      "title": "Общая схема архитектурного решения",
+      "quote": "Мобильное приложение → сервис настроек. Карточный процессинг → учёт расходов → сервис push.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-003",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "ui",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Дизайн процесса UI",
+      "block_ids": [
+        "B012"
+      ],
+      "title": "Состав элементов экрана настроек уведомления",
+      "quote": "Карты → Расходы → Уведомления. На экране видны переключатель, поле «Порог, ₸», сумма за месяц и кнопка «Сохранить»",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-004",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "ui",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Дизайн процесса UI",
+      "block_ids": [
+        "B012"
+      ],
+      "title": "Отображение сообщения об ошибке ввода",
+      "quote": "При ошибке ввода сообщение появляется под полем",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-005",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "process",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › BPMN схема процесса",
+      "block_ids": [
+        "B013"
+      ],
+      "title": "BPMN процесс обработки покупки и отправки push",
+      "quote": "Проведение покупки → пересчёт расходов → проверка порога → при достижении отправка push → завершение.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-006",
+      "doc_id": "Ф-1",
+      "id_assigned": false,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "block_ids": [
+        "B014"
+      ],
+      "title": "Установка значения порога и состояния уведомления по умолчанию",
+      "quote": "Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-007",
+      "doc_id": "Ф-2",
+      "id_assigned": false,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "block_ids": [
+        "B015"
+      ],
+      "title": "Правила учёта операций в месячных расходах",
+      "quote": "Ф-2. Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-008",
+      "doc_id": "Ф-3",
+      "id_assigned": false,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "block_ids": [
+        "B016"
+      ],
+      "title": "Условия и лимит отправки push-уведомления",
+      "quote": "Ф-3. Когда расходы переходят от суммы ниже порога к сумме, равной порогу или выше, клиент получает push. На карту приходится максимум один такой push за календарный месяц.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-009",
+      "doc_id": "Ф-4",
+      "id_assigned": false,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "block_ids": [
+        "B017"
+      ],
+      "title": "Сохранение накопленной суммы и повторная отправка push при изменении порога",
+      "quote": "Ф-4. При изменении порога накопленная сумма сохраняется. Если она ниже нового порога, следующее достижение вызывает push независимо от истории предыдущей настройки.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-010",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "integration",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Sequence Diagram",
+      "block_ids": [
+        "B018"
+      ],
+      "title": "Последовательность взаимодействия сервисов при проведении покупки",
+      "quote": "Процессинг → сервис расходов: проведена покупка. Сервис расходов → настройки: получить порог карты. Сервис расходов → push: передать последние четыре цифры карты и сумму при достижении порога.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-011",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "nonfunctional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Нефункциональные требования",
+      "block_ids": [
+        "B019"
+      ],
+      "title": "Максимальное время передачи push на отправку",
+      "quote": "Сервис передаёт push на отправку в течение минуты после получения события.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-012",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "data",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к данным",
+      "block_ids": [
+        "B020"
+      ],
+      "title": "Состав сохраняемых данных по карте и операциям",
+      "quote": "Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-013",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "integration",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к интеграции",
+      "block_ids": [
+        "B021"
+      ],
+      "title": "Интеграция приложения с дочерним REST API",
+      "quote": "Приложение читает и сохраняет настройки через дочерний документ «Уведомление о расходах по карте — REST API»",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-014",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к интеграции",
+      "block_ids": [
+        "B021"
+      ],
+      "title": "Идемпотентность обработки событий процессинга",
+      "quote": "Повторная доставка одного события процессинга сохраняет исходный итог",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-015",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "other",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований",
+      "block_ids": [
+        "B022"
+      ],
+      "title": "заполняются тестировщиками",
+      "quote": "заполняются тестировщиками",
+      "check_status": "checked",
+      "source": "rule"
+    },
+    {
+      "id": "R-016",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "acceptance_criterion",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Критерии приемки",
+      "block_ids": [
+        "B024"
+      ],
+      "title": "Проверка отправки push при достижении порога в 50 000 ₸",
+      "quote": "Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-017",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "acceptance_criterion",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Критерии приемки",
+      "block_ids": [
+        "B025"
+      ],
+      "title": "Проверка распределения покупок по месяцам с учетом времени Алматы",
+      "quote": "Покупка 31 января в 23:58 на 4 000 ₸ | Провести 1 февраля в 00:03 по Алматы | Февральский счётчик вырос на 4 000 ₸",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-018",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "acceptance_criterion",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Критерии приемки",
+      "block_ids": [
+        "B026"
+      ],
+      "title": "Проверка исключения переводов из счетчика расходов",
+      "quote": "Расходы 19 900 ₸, порог 20 000 ₸ | Перевести 500 ₸ | Счётчик показывает 19 900 ₸",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-019",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "other",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Ревью требований",
+      "block_ids": [
+        "B027"
+      ],
+      "title": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.",
+      "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.",
+      "check_status": "checked",
+      "source": "rule"
+    },
+    {
+      "id": "R-020",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Общие параметры",
+      "block_ids": [
+        "B047",
+        "B048",
+        "B049",
+        "B050",
+        "B051",
+        "B052",
+        "B053"
+      ],
+      "title": "Спецификация метода API /alerts/saveLimit",
+      "quote": "Description | Сохранение порога. Функциональные требования: чтение порога; REST type | GET; Authorization | Bearer, сессия владельца карты; Controller | AlertsController; URL type | Dev / Prod; Request URL | Dev: /alerts/saveLimit . Prod: —; CURL | curl -G \"$BASE/alerts/saveLimit\" -H \"Authorization: Bearer $TOKEN\" --data 'cardId=demo-42&amount=50000&enabled=1'",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-021",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Логика работы метода",
+      "block_ids": [
+        "B059"
+      ],
+      "title": "Проверка пользовательской сессии",
+      "quote": "Проверить пользовательскую сессию.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-022",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Логика работы метода",
+      "block_ids": [
+        "B060"
+      ],
+      "title": "Проверка принадлежности карты клиенту",
+      "quote": "Проверить принадлежность карты клиенту.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-023",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Логика работы метода",
+      "block_ids": [
+        "B061"
+      ],
+      "title": "Проверка корректности суммы и переключателя",
+      "quote": "Проверить сумму и переключатель.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-024",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Логика работы метода",
+      "block_ids": [
+        "B062"
+      ],
+      "title": "Замена настройки и возврат результата сохранения",
+      "quote": "Заменить настройку и вернуть результат сохранения.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-025",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Логика работы метода",
+      "block_ids": [
+        "B063"
+      ],
+      "title": "Обработка отклонения суммы порога",
+      "quote": "При отклонении суммы вернуть прежнее состояние и результат ERROR.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-026",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "constraint",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Особые правила",
+      "block_ids": [
+        "B064"
+      ],
+      "title": "Ограничение на значение порога в тенге",
+      "quote": "Целое число тенге, обе границы включены.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-027",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Особые правила",
+      "block_ids": [
+        "B065"
+      ],
+      "title": "Перезапись действующей настройки при повторном сохранении",
+      "quote": "Повторное сохранение заменяет действующую настройку.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-028",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "functional",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Особые правила",
+      "block_ids": [
+        "B066"
+      ],
+      "title": "Сохранение накопленных расходов при изменении порога",
+      "quote": "Изменение порога сохраняет накопленные расходы.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-029",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "process",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Схема",
+      "block_ids": [
+        "B067"
+      ],
+      "title": "Схема взаимодействия компонентов при вызове AlertsController",
+      "quote": "Приложение → AlertsController → хранилище настроек → AlertsController → приложение.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-030",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Параметры запроса › Query-параметры",
+      "block_ids": [
+        "B070",
+        "B071",
+        "B072"
+      ],
+      "title": "Таблица «Query-параметры»: cardId, amount, enabled",
+      "quote": "cardId | string | 1–64 | Да | Карта клиента | Идентификатор карты | card_id; amount | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге | limit_kzt; enabled | integer | 1 знак | Да | 0 или 1 | Признак включения | enabled",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-031",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Параметры запроса › Request body",
+      "block_ids": [
+        "B073",
+        "B074"
+      ],
+      "title": "Схема тела запроса метода API",
+      "quote": "Content-Type: application/json . Тело не используется.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-032",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Ответ",
+      "block_ids": [
+        "B075"
+      ],
+      "title": "Классификация статусов успешности ответа",
+      "quote": "Если результат 200 или 201 — успешный. Если результат 400, 401 и далее — неуспешный.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-033",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Ответ",
+      "block_ids": [
+        "B077",
+        "B078",
+        "B079",
+        "B080"
+      ],
+      "title": "Таблица «Ответ»: result, amount, enabled, message",
+      "quote": "result | string | OK / ERROR | Исход сохранения | —; amount | string | При успехе | Порог в тенге | limit_kzt; enabled | string | «0» или «1» | Признак включения | enabled; message | string | При ошибке | Описание ошибки | —",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-034",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Статусы",
+      "block_ids": [
+        "B081",
+        "B083"
+      ],
+      "title": "Ответ со статусом 200 (Successful)",
+      "quote": "200. Ответ в случае успешного выполнения метода",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-035",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Статусы",
+      "block_ids": [
+        "B081"
+      ],
+      "title": "Ответ со статусом 400 (Bad Request)",
+      "quote": "400. Ответ в случае, если параметры запроса заполнены неверно",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-036",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Статусы › 200. Successful — Created",
+      "block_ids": [
+        "B082",
+        "B084",
+        "B085"
+      ],
+      "title": "Ответ со статусом 401 (Unauthorized)",
+      "quote": "{\"result\":\"OK\",\"amount\":\"50000\",\"enabled\":\"1\"} {\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"} 401. Ответ в случае, если запрос выполнен без необходимой авторизации. 403. Ответ в случае, если на указанный ресурс доступ запрещен. 500. Ответ в случае, если произошла внутренняя ошибка сервера.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-037",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Статусы › 200. Successful — Created",
+      "block_ids": [
+        "B085",
+        "B086",
+        "B087",
+        "B088",
+        "B089",
+        "B090"
+      ],
+      "title": "Ответ со статусом 403 / 404 (Forbidden / Not Found)",
+      "quote": "403. Ответ в случае, если на указанный ресурс доступ запрещен",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-038",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Статусы › 200. Successful — Created",
+      "block_ids": [
+        "B085"
+      ],
+      "title": "Ответ со статусом 500 (Internal Server Error)",
+      "quote": "500. Ответ в случае, если произошла внутренняя ошибка сервера",
+      "check_status": "checked",
+      "source": "llm"
+    }
+  ],
+  "skipped_blocks": [
+    {
+      "block_id": "B001",
+      "reason": "meta",
+      "text": "Комплект из двух исходных документов. Текст требований не вычитывался и не исправлялся. Часть B — дочерняя спецификация, на которую ссылается раздел интеграции в части A."
+    },
+    {
+      "block_id": "B002",
+      "reason": "meta",
+      "text": "Поле | Значение"
+    },
+    {
+      "block_id": "B003",
+      "reason": "meta",
+      "text": "Наименование задачи | Месячный порог расходов по карте"
+    },
+    {
+      "block_id": "B004",
+      "reason": "meta",
+      "text": "Продукт | Мобильный банк, учебный кейс"
+    },
+    {
+      "block_id": "B005",
+      "reason": "meta",
+      "text": "Бизнес-процесс | Информирование держателя карты"
+    },
+    {
+      "block_id": "B006",
+      "reason": "meta",
+      "text": "Business owner / Product owner / Аналитик | Учебные роли розничного бизнеса, владельца мобильного банка и аналитика команды"
+    },
+    {
+      "block_id": "B007",
+      "reason": "meta",
+      "text": "Тип работы | Новый функционал"
+    },
+    {
+      "block_id": "B008",
+      "reason": "meta",
+      "text": "Влияние на ИС | Мобильный банк, карточный процессинг, сервис уведомлений"
+    },
+    {
+      "block_id": "B009",
+      "reason": "meta",
+      "text": "Задача в JIRA | Практикум без Jira-задачи"
+    },
+    {
+      "block_id": "B023",
+      "reason": "meta",
+      "text": "Исходные условия | Действие | Ожидаемый результат"
+    },
+    {
+      "block_id": "B028",
+      "reason": "template",
+      "text": "Проверка | Создано или доступно | Проверено | Примечания"
+    },
+    {
+      "block_id": "B029",
+      "reason": "template",
+      "text": "Техническое требование зафиксировано и покрывает бизнес-требование | Да / Нет | Да / Нет | "
+    },
+    {
+      "block_id": "B030",
+      "reason": "template",
+      "text": "Функциональная спецификация имеет структурированное описание (по стандарту, шаблону) | Да / Нет | Да / Нет | "
+    },
+    {
+      "block_id": "B031",
+      "reason": "template",
+      "text": "Sequence-диаграммы, предусмотрены взаимодействия систем, компонентов и решений | Да / Нет / Не требуется | Да / Нет / Не требуется | "
+    },
+    {
+      "block_id": "B032",
+      "reason": "template",
+      "text": "Требование покрывает спецификацию UX/UI дизайна | Да / Нет / Не требуется | Да / Нет / Не требуется | "
+    },
+    {
+      "block_id": "B033",
+      "reason": "template",
+      "text": "Реализация задачи/проекта предусматривает схему отката решений | Да / Нет / Не требуется | Да / Нет / Не требуется | При невозможности отката — варианты скрытия функционала"
+    },
+    {
+      "block_id": "B034",
+      "reason": "template",
+      "text": "Требование может быть протестировано | Да / Нет | Да / Нет | "
+    },
+    {
+      "block_id": "B035",
+      "reason": "template",
+      "text": "Требование предусматривает модель данных или поток, содержит описание | Да / Нет / Не требуется | Да / Нет / Не требуется | "
+    },
+    {
+      "block_id": "B036",
+      "reason": "template",
+      "text": "Требование не имеет противоречий или явных показателей операционных рисков | Да / Нет | Да / Нет | "
+    },
+    {
+      "block_id": "B037",
+      "reason": "template",
+      "text": "Требование содержит архитектуру и согласовано с архитекторами | Да / Нет / Не требуется | Да / Нет / Не требуется | Для архитектуры — чек-лист"
+    },
+    {
+      "block_id": "B038",
+      "reason": "template",
+      "text": "Все изменения, влияющие на иные продукты/системы в требовании, согласованы с ответственными лицами | Да / Нет / Не требуется | Да / Нет / Не требуется | "
+    },
+    {
+      "block_id": "B039",
+      "reason": "template",
+      "text": "Структура требований не несёт изменений и рисков информационной безопасности | Да / Нет | Да / Нет | По информационной безопасности — чек-лист"
+    },
+    {
+      "block_id": "B040",
+      "reason": "template",
+      "text": "В требовании присутствует схема полного бизнес-процесса и часть реализуемой доработки | Да / Нет | Да / Нет | "
+    },
+    {
+      "block_id": "B041",
+      "reason": "template",
+      "text": "Требование носит интеграционный характер и имеет четкую постановку реализации интеграционного взаимодействия | Да / Нет / Не требуется | Да / Нет / Не требуется | "
+    },
+    {
+      "block_id": "B042",
+      "reason": "template",
+      "text": "Поддерживается версионность документа / зафиксирована | Да / Нет | Да / Нет | "
+    },
+    {
+      "block_id": "B043",
+      "reason": "template",
+      "text": "Подразделение | ФИО ответственного | Подпись"
+    },
+    {
+      "block_id": "B044",
+      "reason": "template",
+      "text": " |  | "
+    },
+    {
+      "block_id": "B045",
+      "reason": "meta",
+      "text": "Дочерний документ части A: «Уведомление о расходах по карте — REST API»."
+    },
+    {
+      "block_id": "B046",
+      "reason": "meta",
+      "text": "Поле | Значение"
+    },
+    {
+      "block_id": "B054",
+      "reason": "meta",
+      "text": "Swagger | —"
+    },
+    {
+      "block_id": "B055",
+      "reason": "meta",
+      "text": "Gitlab project | Учебный контур"
+    },
+    {
+      "block_id": "B056",
+      "reason": "meta",
+      "text": "Framework | Учебный контур"
+    },
+    {
+      "block_id": "B057",
+      "reason": "meta",
+      "text": "Author | Школа тестирования"
+    },
+    {
+      "block_id": "B058",
+      "reason": "meta",
+      "text": "Developer | Команда практикума"
+    },
+    {
+      "block_id": "B068",
+      "reason": "empty",
+      "text": "Не используются."
+    },
+    {
+      "block_id": "B069",
+      "reason": "meta",
+      "text": "Parameter | Format | Size | Mandatory | Logic | Description | DB field"
+    },
+    {
+      "block_id": "B076",
+      "reason": "meta",
+      "text": "Parameter | Format | Logic | Description | DB field"
+    }
+  ],
+  "findings": [
+    {
+      "id": "D-001",
+      "criterion": "verifiable",
+      "severity": "minor",
+      "defect_class": "unverifiable",
+      "evidence": [
+        {
+          "quote": "Сервис передаёт push на отправку в течение минуты после получения события",
+          "section": "Часть A. Новый функционал › Нефункциональные требования",
+          "requirement_id": "R-011",
+          "block_ids": [
+            "B019"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Не указаны перцентиль (SLA) и условия нагрузки, при которых гарантируется передача push в течение минуты, что не позволяет составить однозначный профиль нагрузочного тестирования.",
+      "recommendation": "Добавить перцентиль выполнения нефункционального требования (например, 99% запросов).",
+      "clarifying_question": "Для какой доли событий (перцентиля) и при какой нагрузке должно соблюдаться ограничение передачи push в течение минуты?",
+      "answer_options": [
+        "Для 99% событий при пиковой нагрузке",
+        "Для 100% событий в любых условиях"
+      ],
+      "option_consequences": [
+        "Критерии производительности допускают задержку для 1% редких выбросов",
+        "Любое превышение 60 секунд на стенде считается дефектом"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "architect",
+      "related_notes": [],
+      "requirement_ids": [
+        "R-011"
+      ],
+      "remark": false,
+      "quote": "Сервис передаёт push на отправку в течение минуты после получения события",
+      "section": "Часть A. Новый функционал › Нефункциональные требования"
+    },
+    {
+      "id": "D-002",
+      "criterion": "conforming",
+      "severity": "minor",
+      "defect_class": "other",
+      "evidence": [
+        {
+          "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены",
+          "section": "Часть A. Новый функционал › Ревью требований",
+          "requirement_id": "R-019",
+          "block_ids": [
+            "B027"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Описание содержит информацию о незаполненных метаданных и листе ревью, что нарушает правила оформления и версионирования документа.",
+      "recommendation": "Заполнить метаданные документа (версию, дату) и результаты прохождения чек-листа согласования.",
+      "clarifying_question": "Какая версия документа и дата должны быть зафиксированы в блоке версионирования?",
+      "answer_options": [
+        "Версия 1.0 от текущей даты",
+        "Версия 0.1 (Черновик)"
+      ],
+      "option_consequences": [
+        "Документ приобретает статус утверждённой спецификации 1.0",
+        "Документ регистрируется как черновик в работе"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "requirement_ids": [
+        "R-019"
+      ],
+      "remark": false,
+      "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены",
+      "section": "Часть A. Новый функционал › Ревью требований"
+    },
+    {
+      "id": "D-003",
+      "criterion": "complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Проверить сумму и переключатель",
+          "section": "Часть B. REST API › Логика работы метода",
+          "requirement_id": "R-023",
+          "block_ids": [
+            "B061"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Не указаны конкретные критерии проверки суммы и переключателя (например, допустимые значения enabled 0 и 1, границы суммы), что не позволяет написать полный набор тестов валидации.",
+      "recommendation": "Уточнить правила валидации для суммы (1000–1000000) и переключателя (0 или 1).",
+      "clarifying_question": "Какие именно значения переключателя enabled и суммы считаются валидными при проверке?",
+      "answer_options": [
+        "amount от 1000 до 1000000 включительно, enabled только 0 или 1",
+        "amount любые целые положительные числа, enabled любые целые числа"
+      ],
+      "option_consequences": [
+        "Валидация будет соответствовать ограничениям из требований к данным и особых правил.",
+        "Потребуется пересмотреть ограничения на сумму и переключатель."
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "requirement_ids": [
+        "R-023"
+      ],
+      "remark": false,
+      "quote": "Проверить сумму и переключатель",
+      "section": "Часть B. REST API › Логика работы метода"
+    },
+    {
+      "id": "D-004",
+      "criterion": "complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Заменить настройку и вернуть результат сохранения",
+          "section": "Часть B. REST API › Логика работы метода",
+          "requirement_id": "R-024",
+          "block_ids": [
+            "B062"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Не описано поведение системы при ошибке записи в хранилище настроек (исключение базы данных, таймаут): какой код ответа и текст ошибки возвращаются клиенту.",
+      "recommendation": "Указать возвращаемый статус (например, 500) и формат ответа при сбое базы данных.",
+      "clarifying_question": "Какой статус и тело ответа должны возвращаться при сбое сохранения в хранилище настроек?",
+      "answer_options": [
+        "Статус 500 с телом {'message':'Ошибка сервиса'}",
+        "Статус 503 Service Unavailable"
+      ],
+      "option_consequences": [
+        "Поведение при ошибке будет соответствовать разделу статусов 500.",
+        "Потребуется добавить описание статуса 503 в спецификацию ответов."
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "architect",
+      "related_notes": [],
+      "requirement_ids": [
+        "R-024"
+      ],
+      "remark": false,
+      "quote": "Заменить настройку и вернуть результат сохранения",
+      "section": "Часть B. REST API › Логика работы метода"
+    }
+  ],
+  "set_findings": [
+    {
+      "id": "S-001",
+      "criterion": "set_consistent",
+      "severity": "major",
+      "defect_class": "contradictory",
+      "evidence": [
+        {
+          "quote": "Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push",
+          "section": "Часть A. Новый функционал › Критерии приемки",
+          "requirement_id": "R-016",
+          "block_ids": [
+            "B024"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Для суммы покупки (денежных сумм (тенге / тиыны)) используются разные единицы измерения: в разделе «Часть A. Новый функционал › Критерии приемки» указана единица «₸» («Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push»), а в разделе «Часть A. Новый функционал › Требования к данным» — «тиынах» («Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.»), при этом не указано правило пересчёта или округления.",
+      "recommendation": "Зафиксировать единую единицу измерения во всех разделах спецификации либо явно описать коэффициент пересчёта и правило округления.",
+      "clarifying_question": "Следует ли привести единицы суммы покупки («₸» и «тиынах») к единой единице измерения или явно зафиксировать правило пересчёта и округления?",
+      "answer_options": [
+        "Хранить и сравнивать в одной единице, указать её в требовании",
+        "Оставить разные единицы и описать правило пересчёта и округления"
+      ],
+      "option_consequences": [
+        "Для требования R-016 закрепляется единая единица измерения во всех разделах; конфликт единиц закрывается.",
+        "В требовании R-016 добавляются коэффициент пересчёта и правило округления; противоречие единиц снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "contradiction",
+      "requirement_ids": [
+        "R-016"
+      ],
+      "cross_part": false,
+      "quote": "Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push",
+      "section": "Часть A. Новый функционал › Критерии приемки"
+    },
+    {
+      "id": "S-002",
+      "criterion": "set_consistent",
+      "severity": "major",
+      "defect_class": "contradictory",
+      "evidence": [
+        {
+          "quote": "Если результат 200 или 201 — успешный. Если результат 400, 401 и далее — неуспешный",
+          "section": "Часть B. REST API › Ответ",
+          "requirement_id": "R-032",
+          "block_ids": [
+            "B075"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В разделе «Часть B. REST API › Ответ» упоминается HTTP-статус 201, однако в перечне объявленных статусов (200, 400, 401, 403, 500) он отсутствует.",
+      "recommendation": "Добавить описание и пример ответа для кода 201 в перечень статусов либо привести текст к одному из объявленных кодов.",
+      "clarifying_question": "Должен ли метод действительно возвращать HTTP-статус 201 (и в каком формате тела), или следует использовать один из кодов (200, 400, 401, 403, 500)?",
+      "answer_options": [
+        "Добавить код в перечень статусов с описанием и примером",
+        "Заменить код в тексте на один из объявленных"
+      ],
+      "option_consequences": [
+        "Необъявленный код добавляется в перечень статусов требования R-032 с описанием и примером; расхождение закрывается.",
+        "Упоминание кода в требовании R-032 заменяется на один из объявленных статусов; расхождение снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "contradiction",
+      "requirement_ids": [
+        "R-032"
+      ],
+      "cross_part": false,
+      "quote": "Если результат 200 или 201 — успешный. Если результат 400, 401 и далее — неуспешный",
+      "section": "Часть B. REST API › Ответ"
+    },
+    {
+      "id": "S-003",
+      "criterion": "unambiguous",
+      "severity": "major",
+      "defect_class": "contradictory",
+      "evidence": [
+        {
+          "quote": "{\"result\":\"OK\",\"amount\":\"50000\",\"enabled\":\"1\"}",
+          "section": "Часть B. REST API › Статусы › 200. Successful — Created",
+          "requirement_id": "R-036",
+          "block_ids": [
+            "B082"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Заголовок «200. Successful — Created» смешивает два разных HTTP-статуса: код 200 и формулировка «created» (соответствует коду 201), что создаёт неоднозначность ожидаемого кода ответа.",
+      "recommendation": "Привести заголовок и описание к одному конкретному HTTP-статусу с соответствующей стандартной формулировкой RFC 9110.",
+      "clarifying_question": "Какой именно HTTP-статус должен возвращаться в сценарии «200. Successful — Created»?",
+      "answer_options": [
+        "Исправить заголовок подраздела под описанный код",
+        "Исправить описание под код из заголовка"
+      ],
+      "option_consequences": [
+        "Заголовок подраздела в требовании R-036 приводится к описанному коду ответа; неоднозначность снимается.",
+        "Описание и пример в требовании R-036 приводятся к коду из заголовка; неоднозначность закрывается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "contradiction",
+      "requirement_ids": [
+        "R-036"
+      ],
+      "cross_part": false,
+      "quote": "{\"result\":\"OK\",\"amount\":\"50000\",\"enabled\":\"1\"}",
+      "section": "Часть B. REST API › Статусы › 200. Successful — Created"
+    },
+    {
+      "id": "S-004",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено",
+          "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+          "requirement_id": "R-006",
+          "block_ids": [
+            "B014"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Для числовых границ «от 1 000 до 1 000 000» в критериях приёмки нет строк со значением ровно на границе и сразу за ней: ошибку включительности нельзя поймать приёмкой.",
+      "recommendation": "Добавить в критерии приёмки строки для каждого значения на границе и на шаг за ней.",
+      "clarifying_question": "Какой результат ожидается ровно на каждой границе и на шаг за ней?",
+      "answer_options": [],
+      "option_consequences": [],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "qa",
+      "related_notes": [],
+      "set_check": "acceptance_gap",
+      "requirement_ids": [
+        "R-006"
+      ],
+      "cross_part": false,
+      "quote": "Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования"
+    },
+    {
+      "id": "S-005",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются",
+          "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+          "requirement_id": "R-007",
+          "block_ids": [
+            "B015"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В требованиях не определено, учитываются ли операции и отправляются ли push-уведомления для карт со статусами «заблокирована», «закрыта» или «истек срок действия». Пример: Покупка совершается по карте, которая в момент обработки транзакции находится в заблокированном или закрытом статусе.",
+      "recommendation": "Добавить правила учета расходов и отправки уведомлений в зависимости от статуса карты.",
+      "clarifying_question": "Должны ли учитываться расходы и отправляться push-уведомления, если карта заблокирована или закрыта на момент проведения операции?",
+      "answer_options": [
+        "Учитывать расходы и отправлять push только для активных карт",
+        "Учитывать расходы для всех карт, но отправлять push только при активном статусе",
+        "Игнорировать операции по заблокированным и закрытым картам во всех случаях"
+      ],
+      "option_consequences": [
+        "Будет четко разграничено поведение по неактивным картам",
+        "Расходы будут считаться для закрытых счетов без уведомлений",
+        "Операции по заблокированным картам полностью исключатся из расчетов"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "missing_scenario",
+      "requirement_ids": [
+        "R-007"
+      ],
+      "cross_part": false,
+      "quote": "Месяц определяется по дате совершения покупки в Алматы. В расходы входят проведённые покупки. Возврат уменьшает расходы месяца исходной покупки. Переводы и снятие наличных исключаются",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования"
+    },
+    {
+      "id": "S-006",
+      "criterion": "set_validatable",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Ф-4. При изменении порога накопленная сумма сохраняется. Если она ниже нового порога, следующее достижение вызывает push независимо от истории предыдущей настройки.",
+          "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+          "requirement_id": "R-009",
+          "block_ids": [
+            "B017"
+          ],
+          "quote_status": "verified"
+        },
+        {
+          "quote": "Сервис передаёт push на отправку в течение минуты после получения события.",
+          "section": "Часть A. Новый функционал › Нефункциональные требования",
+          "requirement_id": "R-011",
+          "block_ids": [
+            "B019"
+          ],
+          "quote_status": "verified"
+        },
+        {
+          "quote": "Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге.",
+          "section": "Часть A. Новый функционал › Требования к данным",
+          "requirement_id": "R-012",
+          "block_ids": [
+            "B020"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Для требований R-009, R-011, R-012, R-013, R-021, R-022, R-023, R-024, R-025, R-027 в документе нет ни одного критерия приёмки: результат их реализации нельзя принять по согласованным сценариям.",
+      "recommendation": "Добавить критерии приёмки с исходными условиями, действием и ожидаемым результатом для каждого из перечисленных требований.",
+      "clarifying_question": "Какие сценарии приёмки подтверждают выполнение перечисленных требований?",
+      "answer_options": [
+        "Критерии приёмки будут добавлены в документ",
+        "Сценарии будут описаны в тест-кейсах QA"
+      ],
+      "option_consequences": [
+        "Для требований R-009, R-011, R-012, R-013, R-021, R-022, R-023, R-024, R-025, R-027 в документ добавляются приёмочные сценарии; пробел покрытия закрывается.",
+        "Для требований R-009, R-011, R-012, R-013, R-021, R-022, R-023, R-024, R-025, R-027 фиксируется ссылка на тест-кейсы QA; пробел покрытия в ТЗ снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "qa",
+      "related_notes": [],
+      "set_check": "acceptance_gap",
+      "requirement_ids": [
+        "R-009",
+        "R-011",
+        "R-012",
+        "R-013",
+        "R-021",
+        "R-022",
+        "R-023",
+        "R-024",
+        "R-025",
+        "R-027"
+      ],
+      "cross_part": false,
+      "quote": "Ф-4. При изменении порога накопленная сумма сохраняется. Если она ниже нового порога, следующее достижение вызывает push независимо от истории предыдущей настройки.",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования"
+    },
+    {
+      "id": "S-007",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Процессинг → сервис расходов: проведена покупка. Сервис расходов → настройки: получить порог карты. Сервис расходов → push: передать последние четыре цифры карты и сумму при достижении порога",
+          "section": "Часть A. Новый функционал › Sequence Diagram",
+          "requirement_id": "R-010",
+          "block_ids": [
+            "B018"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Sequence-диаграмма и интеграционные требования описывают успешный сценарий передачи push, но не определяют поведение при сбое или таймауте сервиса push-уведомлений. Пример: Карточный процессинг отправляет событие о покупке, но сервис push-уведомлений временно недоступен.",
+      "recommendation": "Описать поведение системы при недоступности сервиса push (повторные попытки, очередь сообщений или потеря уведомления).",
+      "clarifying_question": "Как сервис расходов должен обрабатывать ошибку доставки или таймаут при вызове сервиса push-уведомлений?",
+      "answer_options": [
+        "Ставить сообщение в очередь повторной отправки (retry queue)",
+        "Логировать ошибку без повторных попыток отправки",
+        "Использовать синхронный таймаут с отловом исключения в процессинге"
+      ],
+      "option_consequences": [
+        "Будет гарантирована доставка уведомлений при кратковременных сбоях",
+        "Возможна потеря уведомлений при сбоях связи",
+        "Возможна блокировка потока обработки транзакций процессинга"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "architect",
+      "related_notes": [],
+      "set_check": "missing_scenario",
+      "requirement_ids": [
+        "R-010"
+      ],
+      "cross_part": false,
+      "quote": "Процессинг → сервис расходов: проведена покупка. Сервис расходов → настройки: получить порог карты. Сервис расходов → push: передать последние четыре цифры карты и сумму при достижении порога",
+      "section": "Часть A. Новый функционал › Sequence Diagram"
+    },
+    {
+      "id": "S-008",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге",
+          "section": "Часть A. Новый функционал › Требования к данным",
+          "requirement_id": "R-012",
+          "block_ids": [
+            "B020"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Требование R-012 предписывает хранить данные транзакций и настроек, но не определяет срок хранения (TTL), политику архивации или удаления исторических данных за прошлые месяцы. Пример: Система функционирует несколько лет, объем данных растет; возникает вопрос о сроке хранения истории операций и агрегатов.",
+      "recommendation": "Указать срок хранения агрегированных месячных расходов и деталей операций в базе данных.",
+      "clarifying_question": "В течение какого срока должны храниться данные о месячных расходах и операциях в базе данных перед архивацией или удалением?",
+      "answer_options": [
+        "Хранить данные текущего и предыдущего календарного года",
+        "Хранить данные в течение 3 лет в соответствии с регуляторными требованиями",
+        "Определить бессрочное хранение до закрытия счета карты"
+      ],
+      "option_consequences": [
+        "Будут заложены требования к архивации и росте базы данных",
+        "Будут учтены требования регуляторов по хранению истории",
+        "Потребуется неограниченный объем дискового пространства"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "architect",
+      "related_notes": [],
+      "set_check": "missing_requirement",
+      "requirement_ids": [
+        "R-012"
+      ],
+      "cross_part": false,
+      "quote": "Хранить идентификатор карты, месяц, идентификатор операции, сумму покупки в тиынах, признак отправки и порог в тенге",
+      "section": "Часть A. Новый функционал › Требования к данным"
+    },
+    {
+      "id": "S-009",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Повторная доставка одного события процессинга сохраняет исходный итог",
+          "section": "Часть A. Новый функционал › Требования к интеграции",
+          "requirement_id": "R-014",
+          "block_ids": [
+            "B021"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Требование R-014 гарантирует сохранение итога при повторной доставке, но не определяет код ответа и поведение API при получении запроса с тем же ключом идемпотентности, но конфликтующими данными. Пример: Процессинг повторно отправляет событие покупки с тем же transaction_id, но изменившейся суммой (ошибка на стороне источника).",
+      "recommendation": "Описать реакцию API и коды ответа при повторном запросе с тем же ключом идемпотентности и отличающимися параметрами.",
+      "clarifying_question": "Какой HTTP-код и тело ответа должен возвращать сервис при повторном запросе с тем же идентификатором операции, но с другими параметрами?",
+      "answer_options": [
+        "Возвращать 200 OK с игнорированием новых данных и возвратом исходного результата",
+        "Возвращать 400 Bad Request с ошибкой конфликта параметров",
+        "Возвращать 409 Conflict с сообщением о дубликате"
+      ],
+      "option_consequences": [
+        "Будет обеспечена строгая дедупликация без изменения данных",
+        "Клиент получит ошибку валидации при повторе с измененными данными",
+        "Будет явно возвращаться статус конфликта"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "missing_scenario",
+      "requirement_ids": [
+        "R-014"
+      ],
+      "cross_part": false,
+      "quote": "Повторная доставка одного события процессинга сохраняет исходный итог",
+      "section": "Часть A. Новый функционал › Требования к интеграции"
+    },
+    {
+      "id": "S-010",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "заполняются тестировщиками",
+          "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований",
+          "requirement_id": "R-015",
+          "block_ids": [
+            "B022"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Фраза «заполняются тестировщиками» в разделе тестирования является заглушкой, из-за чего отсутствует план и методика проверки требований. Пример: Тестировщик начинает проверку функционала, но раздел с тест-кейсами и методологией тестирования пуст.",
+      "recommendation": "Заполнить раздел тестирования конкретными тестовыми сценариями и ожидаемыми результатами.",
+      "clarifying_question": "Какие именно тестовые сценарии и методики верификации должны быть включены в раздел тестирования?",
+      "answer_options": [
+        "Включить приемочные тест-кейсы для всех функциональных требований",
+        "Ограничиться ссылкой на внешнюю тест-планировщицу в Jira",
+        "Утвердить чек-лист проверки REST API и пуш-уведомлений"
+      ],
+      "option_consequences": [
+        "Появится полная методика тестирования в документе",
+        "Тесты будут отслеживаться во внешней системе",
+        "Будет зафиксирован минимальный объем проверок API"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "qa",
+      "related_notes": [],
+      "set_check": "empty_section",
+      "requirement_ids": [
+        "R-015"
+      ],
+      "cross_part": false,
+      "quote": "заполняются тестировщиками",
+      "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований"
+    },
+    {
+      "id": "S-011",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены",
+          "section": "Часть A. Новый функционал › Ревью требований",
+          "requirement_id": "R-019",
+          "block_ids": [
+            "B027"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Текст в разделе ревью указывает, что версия и дата документа не заполнены, а пункты чек-листа не отмечены, что нарушает трассируемость и статус согласованности набора. Пример: Аудитор проверяет соответствие документа стандартам ревью, но отметки в чек-листе и версия документа отсутствуют.",
+      "recommendation": "Указать версию и дату документа, а также проставить актуальные отметки в чек-листе ревью.",
+      "clarifying_question": "Какая текущая версия документа установлена и кто должен проставить отметки в чек-листе ревью требований?",
+      "answer_options": [
+        "Указать версию 1.0 и проставить отметки аналитика",
+        "Оставить чек-лист незаполненным до завершения всех согласований",
+        "Удалить пустой чек-лист из спецификации"
+      ],
+      "option_consequences": [
+        "Документ будет иметь официальную версию и подтвержденное ревью",
+        "Статус ревью останется неопределенным",
+        "Структура документа очистится от незаполненных шаблонов"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [
+        "В разделе «Часть A. Новый функционал › Ревью требований» присутствует заглушка «не заполнен»: требования не зафиксированы окончательно."
+      ],
+      "set_check": "empty_section",
+      "requirement_ids": [
+        "R-019"
+      ],
+      "cross_part": false,
+      "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены",
+      "section": "Часть A. Новый функционал › Ревью требований"
+    },
+    {
+      "id": "S-012",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "curl -G \"$BASE/alerts/saveLimit\" -H \"Authorization: Bearer $TOKEN\" --data 'cardId=demo-42&amount=50000&enabled=1'",
+          "section": "Часть B. REST API › Общие параметры",
+          "requirement_id": "R-020",
+          "block_ids": [
+            "B053"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В спецификации REST API и требованиях к данным отсутствуют правила маскирования идентификаторов карт и токенов авторизации в системных логах и журналах аудита. Пример: Системный администратор или служба безопасности проверяет журналы сервера на предмет утечки персональных данных и реквизитов карт.",
+      "recommendation": "Добавить требования по обязательному маскированию cardId и токенов в логах приложений.",
+      "clarifying_question": "Каким образом должен маскироваться идентификатор карты (cardId) и токены авторизации в системных логах приложения?",
+      "answer_options": [
+        "Маскировать cardId, оставляя только последние 4 символа (например, ***42)",
+        "Полностью исключать cardId и токен из логов, записывая только хеш",
+        "Записывать cardId в открытом виде для целей отладки в тестовом контуре"
+      ],
+      "option_consequences": [
+        "Будут выполнены требования информационной безопасности по защите данных",
+        "Будет обеспечена максимальная анонимизация в журналах",
+        "Возникнут риски утечки чувствительных данных в логах продакшена"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "security",
+      "related_notes": [],
+      "set_check": "missing_requirement",
+      "requirement_ids": [
+        "R-020"
+      ],
+      "cross_part": false,
+      "quote": "curl -G \"$BASE/alerts/saveLimit\" -H \"Authorization: Bearer $TOKEN\" --data 'cardId=demo-42&amount=50000&enabled=1'",
+      "section": "Часть B. REST API › Общие параметры"
+    },
+    {
+      "id": "S-013",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "enabled | integer | 1 знак | Да | 0 или 1 | Признак включения | enabled",
+          "section": "Часть B. REST API › Параметры запроса › Query-параметры",
+          "requirement_id": "R-030",
+          "block_ids": [
+            "B072"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В таблице параметров раздела «Часть B. REST API › Параметры запроса › Query-параметры» присутствует флаг включения/отключения «enabled» вместе с обязательными параметрами с проверкой диапазона («amount»), но не описано, должны ли эти параметры передаваться и валидироваться при выключенном флаге.",
+      "recommendation": "Зафиксировать поведение параметров «amount» при выключенном флаге «enabled»: обязательность передачи, пропуск или выполнение валидации диапазона и сохранение прежнего значения.",
+      "clarifying_question": "Как должны обрабатываться обязательные параметры («amount») при выключенном флаге «enabled»: игнорироваться (стать необязательными) или валидироваться по диапазону?",
+      "answer_options": [
+        "При выключенном признаке остальные параметры необязательны и не проверяются",
+        "Параметры обязательны всегда: описать, что с ними делать при выключении"
+      ],
+      "option_consequences": [
+        "В требовании R-030 уточняется, что при выключенном флаге параметры необязательны и не проверяются; пробел закрывается.",
+        "В требовании R-030 описывается обработка обязательных параметров при выключенном флаге; пробел сценария снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "missing_scenario",
+      "requirement_ids": [
+        "R-030"
+      ],
+      "cross_part": false,
+      "quote": "enabled | integer | 1 знак | Да | 0 или 1 | Признак включения | enabled",
+      "section": "Часть B. REST API › Параметры запроса › Query-параметры"
+    },
+    {
+      "id": "S-014",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Техническое требование зафиксировано и покрывает бизнес-требование | Да / Нет | Да / Нет",
+          "section": "Часть A. Новый функционал › Ревью требований",
+          "requirement_id": null,
+          "block_ids": [
+            "B029"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В таблице раздела «Часть A. Новый функционал › Ревью требований» обнаружен незаполненный шаблон: варианты «Да / Нет» повторяются без выбора значения в 14 строках.",
+      "recommendation": "Заполнить строки таблицы конкретными значениями или явно пометить раздел как неприменимый.",
+      "clarifying_question": "Какие фактические значения должны быть указаны в таблице раздела «Часть A. Новый функционал › Ревью требований» вместо шаблонных вариантов «Да / Нет»?",
+      "answer_options": [
+        "Автор заполнит чек-лист до передачи в разработку",
+        "Чек-лист не используется для этой задачи: удалить его из документа"
+      ],
+      "option_consequences": [
+        "В таблице раздела «Часть A. Новый функционал › Ревью требований» проставляются фактические отметки вместо шаблона; замечание закрывается.",
+        "Неиспользуемый шаблонный чек-лист удаляется из раздела «Часть A. Новый функционал › Ревью требований»; замечание снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "empty_section",
+      "requirement_ids": [],
+      "cross_part": false,
+      "quote": "Техническое требование зафиксировано и покрывает бизнес-требование | Да / Нет | Да / Нет",
+      "section": "Часть A. Новый функционал › Ревью требований"
+    },
+    {
+      "id": "S-015",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Подразделение | ФИО ответственного | Подпись",
+          "section": "Часть A. Новый функционал › Блок согласующих",
+          "requirement_id": null,
+          "block_ids": [
+            "B043"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Раздел «Часть A. Новый функционал › Блок согласующих» не содержит заполненных требований или данных.",
+      "recommendation": "Заполнить раздел либо явно указать, что он не применим к данной задаче.",
+      "clarifying_question": "Какие данные или отметки должны быть указаны в разделе «Часть A. Новый функционал › Блок согласующих» или этот раздел следует исключить?",
+      "answer_options": [
+        "Раздел будет заполнен до передачи в разработку",
+        "Раздел не применим к задаче: исключить его с пояснением"
+      ],
+      "option_consequences": [
+        "В разделе «Часть A. Новый функционал › Блок согласующих» добавляются недостающие требования или данные; дефект пустого раздела закрывается.",
+        "Раздел исключается или помечается как неприменимый с пояснением; замечание по разделу «Часть A. Новый функционал › Блок согласующих» снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "empty_section",
+      "requirement_ids": [],
+      "cross_part": false,
+      "quote": "Подразделение | ФИО ответственного | Подпись",
+      "section": "Часть A. Новый функционал › Блок согласующих"
+    },
+    {
+      "id": "S-016",
+      "criterion": "set_consistent",
+      "severity": "minor",
+      "defect_class": "contradictory",
+      "evidence": [
+        {
+          "quote": "Content-Type: application/json",
+          "section": "Часть B. REST API › Параметры запроса › Request body",
+          "requirement_id": "R-031",
+          "block_ids": [
+            "B073"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В разделе «Часть B. REST API › Параметры запроса › Request body» одновременно указан заголовок Content-Type и отмечено, что тело запроса не используется.",
+      "recommendation": "Убрать избыточный заголовок Content-Type при отсутствии тела запроса либо описать передаваемое тело.",
+      "clarifying_question": "Требуется ли передавать заголовок Content-Type в разделе «Часть B. REST API › Параметры запроса › Request body», если тело не используется?",
+      "answer_options": [
+        "Убрать Content-Type для запроса без тела",
+        "Описать тело запроса"
+      ],
+      "option_consequences": [
+        "Избыточный заголовок Content-Type удаляется из требования R-031; расхождение описания закрывается.",
+        "В требовании R-031 добавляется описание тела запроса под указанный Content-Type; противоречие снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "contradiction",
+      "requirement_ids": [
+        "R-031"
+      ],
+      "cross_part": false,
+      "quote": "Content-Type: application/json",
+      "section": "Часть B. REST API › Параметры запроса › Request body"
+    },
+    {
+      "id": "S-017",
+      "criterion": "complete",
+      "severity": "minor",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Проведение покупки → пересчёт расходов → проверка порога → при достижении отправка push → завершение",
+          "section": "Часть A. Новый функционал › Требования к изменениям › BPMN схема процесса",
+          "requirement_id": "R-005",
+          "block_ids": [
+            "B013"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В 3 разделах со схемами процессов («Часть A. Новый функционал › Требования к изменениям › BPMN схема процесса», «Часть A. Новый функционал › Sequence Diagram», «Часть B. REST API › Схема») приведены только однострочные цепочки шагов со стрелками без веток обработки ошибок, отказов и альтернативных исходов.",
+      "recommendation": "Дополнить схемы процессов ветками ошибок, таймаутов и альтернативных сценариев либо приложить полноценные диаграммы.",
+      "clarifying_question": "Какие альтернативные и ошибочные ветки должны быть отражены в схемах разделов «Часть A. Новый функционал › Требования к изменениям › BPMN схема процесса», «Часть A. Новый функционал › Sequence Diagram», «Часть B. REST API › Схема»?",
+      "answer_options": [
+        "Описать участников, шаги и ветки отказов в отдельной схеме процесса",
+        "Схема иллюстративная: сослаться на функциональные требования как на основной источник"
+      ],
+      "option_consequences": [
+        "Схема процесса в требовании R-005 дополняется ветками отказов и альтернативными исходами; пробел закрывается.",
+        "В требовании R-005 фиксируется обзорный статус схемы со ссылкой на функциональные правила; замечание снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "missing_scenario",
+      "requirement_ids": [
+        "R-005"
+      ],
+      "cross_part": false,
+      "quote": "Проведение покупки → пересчёт расходов → проверка порога → при достижении отправка push → завершение",
+      "section": "Часть A. Новый функционал › Требования к изменениям › BPMN схема процесса"
+    },
+    {
+      "id": "S-018",
+      "criterion": "ranked",
+      "severity": "minor",
+      "defect_class": "other",
+      "evidence": [
+        {
+          "quote": "Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено",
+          "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+          "requirement_id": "R-006",
+          "block_ids": [
+            "B014"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В наборе требований не указаны приоритеты (важность) и ожидаемая стабильность для функциональных блоков, что нарушает критерий ranked. Пример: Команда разработки планирует релиз по MVP и сталкивается с отсутствием приоритетов для отдельных функциональных требований.",
+      "recommendation": "Проставить приоритеты (например, MoSCoW) для каждого функционального требования.",
+      "clarifying_question": "Какой приоритет (Must have / Should have) имеет функционал установки порога уведомлений для первой очереди внедрения?",
+      "answer_options": [
+        "Must have (обязательно для релиза MVP)",
+        "Should have (желательно, но может быть отложено)",
+        "Nice to have (опционально)"
+      ],
+      "option_consequences": [
+        "Функционал войдет в первый релиз без обсуждений",
+        "Функционал может быть сдвинут на следующие итерации",
+        "Функционал будет реализован по остаточному принципу"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "traceability",
+      "requirement_ids": [
+        "R-006"
+      ],
+      "cross_part": false,
+      "quote": "Ф-1. Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования"
+    },
+    {
+      "id": "S-019",
+      "criterion": "traceable",
+      "severity": "minor",
+      "defect_class": "other",
+      "evidence": [
+        {
+          "quote": "Сервис передаёт push на отправку в течение минуты после получения события",
+          "section": "Часть A. Новый функционал › Нефункциональные требования",
+          "requirement_id": "R-011",
+          "block_ids": [
+            "B019"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Большинство нормативных формулировок не имеет идентификаторов: 33 из 37 без ID при наличии 4 пронумерованных требований.",
+      "recommendation": "Присвоить уникальные идентификаторы всем требованиям документа для сквозной трассируемости с критериями приёмки и тестами.",
+      "clarifying_question": "Планируется ли ввести единую нумерацию идентификаторов для всех требований документа?",
+      "answer_options": [
+        "Ввести сквозную нумерацию всех требований",
+        "Нумеровать только функциональные требования и критерии приёмки"
+      ],
+      "option_consequences": [
+        "Всем требованиям документа присваиваются уникальные ID; замечание по трассируемости закрывается.",
+        "Нумерация вводится для функциональных требований и критериев приёмки; базовые связи трассируются."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "traceability",
+      "requirement_ids": [
+        "R-011"
+      ],
+      "cross_part": false,
+      "quote": "Сервис передаёт push на отправку в течение минуты после получения события",
+      "section": "Часть A. Новый функционал › Нефункциональные требования"
+    },
+    {
+      "id": "S-020",
+      "criterion": "set_complete",
+      "severity": "minor",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Request URL | Dev: /alerts/saveLimit . Prod: —",
+          "section": "Часть B. REST API › Общие параметры",
+          "requirement_id": "R-020",
+          "block_ids": [
+            "B052"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В строке таблицы раздела «Часть B. REST API › Общие параметры» указано значение-заглушка «Prod: —» вместо конкретного параметра.",
+      "recommendation": "Заменить заглушку фактическим значением или явно зафиксировать, что параметр не применим.",
+      "clarifying_question": "Какое фактическое значение должно быть указано вместо заглушки «Prod: —» в разделе «Часть B. REST API › Общие параметры»?",
+      "answer_options": [
+        "Значение будет указано в документе до начала разработки",
+        "Параметр не применим: отметить «не применимо» с причиной"
+      ],
+      "option_consequences": [
+        "Заглушка в требовании R-020 заменяется конкретным значением; пробел полноты закрывается.",
+        "В требовании R-020 фиксируется пометка «не применимо» с причиной; замечание о заглушке снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "architect",
+      "related_notes": [],
+      "set_check": "missing_requirement",
+      "requirement_ids": [
+        "R-020"
+      ],
+      "cross_part": false,
+      "quote": "Request URL | Dev: /alerts/saveLimit . Prod: —",
+      "section": "Часть B. REST API › Общие параметры"
+    },
+    {
+      "id": "S-021",
+      "criterion": "set_complete",
+      "severity": "minor",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Проверить пользовательскую сессию",
+          "section": "Часть B. REST API › Логика работы метода",
+          "requirement_id": "R-021",
+          "block_ids": [
+            "B059"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В спецификации REST API не указан часовой пояс для временных меток запросов и ответов, несмотря на то, что для расчетных операций используется часовой пояс Алматы. Пример: Клиент выполняет запрос на изменение лимита из другого часового пояса, и время сохранения настройки трактуется неоднозначно.",
+      "recommendation": "Зафиксировать использование UTC или явно указать часовой пояс (Asia/Almaty) для всех временных меток в API.",
+      "clarifying_question": "В каком часовом поясе должны передаваться и фиксироваться временные метки в запросах и ответах REST API?",
+      "answer_options": [
+        "Все временные метки передавать в формате ISO 8601 в UTC",
+        "Использовать единый часовой пояс Asia/Almaty для всех операций",
+        "Не использовать временные метки в ответах API сохранения лимита"
+      ],
+      "option_consequences": [
+        "Будет исключена двусмысленность времени операций в API",
+        "Все события будут привязаны к времени Алматы",
+        "Метки времени в API не потребуются"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "addressee": "analyst",
+      "related_notes": [],
+      "set_check": "missing_requirement",
+      "requirement_ids": [
+        "R-021"
+      ],
+      "cross_part": false,
+      "quote": "Проверить пользовательскую сессию",
+      "section": "Часть B. REST API › Логика работы метода"
+    },
+    {
+      "id": "S-022",
+      "criterion": "set_complete",
+      "severity": "minor",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Swagger | —",
+          "section": "Часть B. REST API › Общие параметры",
+          "requirement_id": null,
+          "block_ids": [
+            "B054"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В строке таблицы раздела «Часть B. REST API › Общие параметры» указано значение-заглушка «—» вместо конкретного параметра.",
+      "recommendation": "Заменить заглушку фактическим значением или явно зафиксировать, что параметр не применим.",
+      "clarifying_question": "Какое фактическое значение должно быть указано вместо заглушки «—» в разделе «Часть B. REST API › Общие параметры»?",
+      "answer_options": [
+        "Значение будет указано в документе до начала разработки",
+        "Параметр не применим: отметить «не применимо» с причиной"
+      ],
+      "option_consequences": [
+        "Заглушка в разделе «Часть B. REST API › Общие параметры» заменяется конкретным значением; пробел полноты закрывается.",
+        "В разделе «Часть B. REST API › Общие параметры» фиксируется пометка «не применимо» с причиной; замечание о заглушке снимается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "architect",
+      "related_notes": [],
+      "set_check": "missing_requirement",
+      "requirement_ids": [],
+      "cross_part": false,
+      "quote": "Swagger | —",
+      "section": "Часть B. REST API › Общие параметры"
+    },
+    {
+      "id": "S-023",
+      "criterion": "ranked",
+      "severity": "minor",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "Комплект из двух исходных документов. Текст требований не вычитывался и не исправлялся. Часть B — дочерняя спецификация, на которую ссылается раздел интеграции в части A",
+          "section": "Уведомление о расходах по карте",
+          "requirement_id": null,
+          "block_ids": [
+            "B001"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "В документе не указаны приоритеты или уровни важности требований (например, Must/Should/Could, P1–P3, высокий/средний/низкий).",
+      "recommendation": "Добавить схему приоритизации и указать приоритет для каждого требования.",
+      "clarifying_question": "Какие требования являются обязательными для первого релиза, а какие имеют более низкий приоритет?",
+      "answer_options": [
+        "Указать приоритет каждого требования (обязательно / желательно)",
+        "Все требования обязательны: зафиксировать это одной фразой"
+      ],
+      "option_consequences": [
+        "Каждому требованию назначается приоритет; замечание по ранжированию снимается.",
+        "В документе фиксируется, что все требования обязательны; замечание по ранжированию закрывается."
+      ],
+      "source": "rule",
+      "review_note": null,
+      "addressee": "business",
+      "related_notes": [],
+      "set_check": "missing_requirement",
+      "requirement_ids": [],
+      "cross_part": false,
+      "quote": "Комплект из двух исходных документов. Текст требований не вычитывался и не исправлялся. Часть B — дочерняя спецификация, на которую ссылается раздел интеграции в части A",
+      "section": "Уведомление о расходах по карте"
+    }
+  ],
+  "coverage": [
+    {
+      "requirement_id": "R-006",
+      "acceptance_ids": [
+        "R-016"
+      ],
+      "status": "covered",
+      "note": "Установка порога проверена в критерии R-016"
+    },
+    {
+      "requirement_id": "R-007",
+      "acceptance_ids": [
+        "R-017",
+        "R-018"
+      ],
+      "status": "covered",
+      "note": "Учет операций по дате и исключение переводов проверяются в R-017 и R-018"
+    },
+    {
+      "requirement_id": "R-008",
+      "acceptance_ids": [
+        "R-016"
+      ],
+      "status": "covered",
+      "note": "Условие отправки push при достижении порога проверено в R-016"
+    },
+    {
+      "requirement_id": "R-009",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для изменения порога и повторной отправки push"
+    },
+    {
+      "requirement_id": "R-010",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для sequence-взаимодействия"
+    },
+    {
+      "requirement_id": "R-011",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для времени отправки push"
+    },
+    {
+      "requirement_id": "R-012",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для модели данных"
+    },
+    {
+      "requirement_id": "R-013",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для интеграции с REST API"
+    },
+    {
+      "requirement_id": "R-014",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для идемпотентности процессинга"
+    },
+    {
+      "requirement_id": "R-021",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    },
+    {
+      "requirement_id": "R-022",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    },
+    {
+      "requirement_id": "R-023",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    },
+    {
+      "requirement_id": "R-024",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    },
+    {
+      "requirement_id": "R-025",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    },
+    {
+      "requirement_id": "R-027",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    },
+    {
+      "requirement_id": "R-028",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Отсутствует критерий приёмки для метода API"
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q-001",
+      "text": "Должны ли учитываться расходы и отправляться push-уведомления, если карта заблокирована или закрыта на момент проведения операции?",
+      "options": [
+        "Учитывать расходы и отправлять push только для активных карт",
+        "Учитывать расходы для всех карт, но отправлять push только при активном статусе",
+        "Игнорировать операции по заблокированным и закрытым картам во всех случаях"
+      ],
+      "option_consequences": [
+        "Будет четко разграничено поведение по неактивным картам",
+        "Расходы будут считаться для закрытых счетов без уведомлений",
+        "Операции по заблокированным картам полностью исключатся из расчетов"
+      ],
+      "finding_ids": [
+        "S-005"
+      ],
+      "requirement_ids": [
+        "R-007"
+      ],
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "blocking": false,
+      "addressee": "business"
+    },
+    {
+      "id": "Q-002",
+      "text": "Как сервис расходов должен обрабатывать ошибку доставки или таймаут при вызове сервиса push-уведомлений?",
+      "options": [
+        "Ставить сообщение в очередь повторной отправки (retry queue)",
+        "Логировать ошибку без повторных попыток отправки",
+        "Использовать синхронный таймаут с отловом исключения в процессинге"
+      ],
+      "option_consequences": [
+        "Будет гарантирована доставка уведомлений при кратковременных сбоях",
+        "Возможна потеря уведомлений при сбоях связи",
+        "Возможна блокировка потока обработки транзакций процессинга"
+      ],
+      "finding_ids": [
+        "S-007"
+      ],
+      "requirement_ids": [
+        "R-010"
+      ],
+      "section": "Часть A. Новый функционал › Sequence Diagram",
+      "blocking": false,
+      "addressee": "architect"
+    },
+    {
+      "id": "Q-003",
+      "text": "В течение какого срока должны храниться данные о месячных расходах и операциях в базе данных перед архивацией или удалением?",
+      "options": [
+        "Хранить данные текущего и предыдущего календарного года",
+        "Хранить данные в течение 3 лет в соответствии с регуляторными требованиями",
+        "Определить бессрочное хранение до закрытия счета карты"
+      ],
+      "option_consequences": [
+        "Будут заложены требования к архивации и росте базы данных",
+        "Будут учтены требования регуляторов по хранению истории",
+        "Потребуется неограниченный объем дискового пространства"
+      ],
+      "finding_ids": [
+        "S-008"
+      ],
+      "requirement_ids": [
+        "R-012"
+      ],
+      "section": "Часть A. Новый функционал › Требования к данным",
+      "blocking": false,
+      "addressee": "architect"
+    },
+    {
+      "id": "Q-004",
+      "text": "Какой HTTP-код и тело ответа должен возвращать сервис при повторном запросе с тем же идентификатором операции, но с другими параметрами?",
+      "options": [
+        "Возвращать 200 OK с игнорированием новых данных и возвратом исходного результата",
+        "Возвращать 400 Bad Request с ошибкой конфликта параметров",
+        "Возвращать 409 Conflict с сообщением о дубликате"
+      ],
+      "option_consequences": [
+        "Будет обеспечена строгая дедупликация без изменения данных",
+        "Клиент получит ошибку валидации при повторе с измененными данными",
+        "Будет явно возвращаться статус конфликта"
+      ],
+      "finding_ids": [
+        "S-009"
+      ],
+      "requirement_ids": [
+        "R-014"
+      ],
+      "section": "Часть A. Новый функционал › Требования к интеграции",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-005",
+      "text": "Какие именно тестовые сценарии и методики верификации должны быть включены в раздел тестирования?",
+      "options": [
+        "Включить приемочные тест-кейсы для всех функциональных требований",
+        "Ограничиться ссылкой на внешнюю тест-планировщицу в Jira",
+        "Утвердить чек-лист проверки REST API и пуш-уведомлений"
+      ],
+      "option_consequences": [
+        "Появится полная методика тестирования в документе",
+        "Тесты будут отслеживаться во внешней системе",
+        "Будет зафиксирован минимальный объем проверок API"
+      ],
+      "finding_ids": [
+        "S-010"
+      ],
+      "requirement_ids": [
+        "R-015"
+      ],
+      "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований",
+      "blocking": false,
+      "addressee": "qa"
+    },
+    {
+      "id": "Q-006",
+      "text": "Какая текущая версия документа установлена и кто должен проставить отметки в чек-листе ревью требований?",
+      "options": [
+        "Указать версию 1.0 и проставить отметки аналитика",
+        "Оставить чек-лист незаполненным до завершения всех согласований",
+        "Удалить пустой чек-лист из спецификации"
+      ],
+      "option_consequences": [
+        "Документ будет иметь официальную версию и подтвержденное ревью",
+        "Статус ревью останется неопределенным",
+        "Структура документа очистится от незаполненных шаблонов"
+      ],
+      "finding_ids": [
+        "S-011"
+      ],
+      "requirement_ids": [
+        "R-019"
+      ],
+      "section": "Часть A. Новый функционал › Ревью требований",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-007",
+      "text": "Каким образом должен маскироваться идентификатор карты (cardId) и токены авторизации в системных логах приложения?",
+      "options": [
+        "Маскировать cardId, оставляя только последние 4 символа (например, ***42)",
+        "Полностью исключать cardId и токен из логов, записывая только хеш",
+        "Записывать cardId в открытом виде для целей отладки в тестовом контуре"
+      ],
+      "option_consequences": [
+        "Будут выполнены требования информационной безопасности по защите данных",
+        "Будет обеспечена максимальная анонимизация в журналах",
+        "Возникнут риски утечки чувствительных данных в логах продакшена"
+      ],
+      "finding_ids": [
+        "S-012"
+      ],
+      "requirement_ids": [
+        "R-020"
+      ],
+      "section": "Часть B. REST API › Общие параметры",
+      "blocking": false,
+      "addressee": "security"
+    },
+    {
+      "id": "Q-008",
+      "text": "Какие именно значения переключателя enabled и суммы считаются валидными при проверке?",
+      "options": [
+        "amount от 1000 до 1000000 включительно, enabled только 0 или 1",
+        "amount любые целые положительные числа, enabled любые целые числа"
+      ],
+      "option_consequences": [
+        "Валидация будет соответствовать ограничениям из требований к данным и особых правил.",
+        "Потребуется пересмотреть ограничения на сумму и переключатель."
+      ],
+      "finding_ids": [
+        "D-003"
+      ],
+      "requirement_ids": [
+        "R-023"
+      ],
+      "section": "Часть B. REST API › Логика работы метода",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-009",
+      "text": "Какой статус и тело ответа должны возвращаться при сбое сохранения в хранилище настроек?",
+      "options": [
+        "Статус 500 с телом {'message':'Ошибка сервиса'}",
+        "Статус 503 Service Unavailable"
+      ],
+      "option_consequences": [
+        "Поведение при ошибке будет соответствовать разделу статусов 500.",
+        "Потребуется добавить описание статуса 503 в спецификацию ответов."
+      ],
+      "finding_ids": [
+        "D-004"
+      ],
+      "requirement_ids": [
+        "R-024"
+      ],
+      "section": "Часть B. REST API › Логика работы метода",
+      "blocking": false,
+      "addressee": "architect"
+    },
+    {
+      "id": "Q-010",
+      "text": "Следует ли привести единицы суммы покупки («₸» и «тиынах») к единой единице измерения или явно зафиксировать правило пересчёта и округления?",
+      "options": [
+        "Хранить и сравнивать в одной единице, указать её в требовании",
+        "Оставить разные единицы и описать правило пересчёта и округления"
+      ],
+      "option_consequences": [
+        "Для требования R-016 закрепляется единая единица измерения во всех разделах; конфликт единиц закрывается.",
+        "В требовании R-016 добавляются коэффициент пересчёта и правило округления; противоречие единиц снимается."
+      ],
+      "finding_ids": [
+        "S-001"
+      ],
+      "requirement_ids": [
+        "R-016"
+      ],
+      "section": "Часть A. Новый функционал › Критерии приемки",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-011",
+      "text": "Должен ли метод действительно возвращать HTTP-статус 201 (и в каком формате тела), или следует использовать один из кодов (200, 400, 401, 403, 500)?",
+      "options": [
+        "Добавить код в перечень статусов с описанием и примером",
+        "Заменить код в тексте на один из объявленных"
+      ],
+      "option_consequences": [
+        "Необъявленный код добавляется в перечень статусов требования R-032 с описанием и примером; расхождение закрывается.",
+        "Упоминание кода в требовании R-032 заменяется на один из объявленных статусов; расхождение снимается."
+      ],
+      "finding_ids": [
+        "S-002"
+      ],
+      "requirement_ids": [
+        "R-032"
+      ],
+      "section": "Часть B. REST API › Ответ",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-012",
+      "text": "Какой именно HTTP-статус должен возвращаться в сценарии «200. Successful — Created»?",
+      "options": [
+        "Исправить заголовок подраздела под описанный код",
+        "Исправить описание под код из заголовка"
+      ],
+      "option_consequences": [
+        "Заголовок подраздела в требовании R-036 приводится к описанному коду ответа; неоднозначность снимается.",
+        "Описание и пример в требовании R-036 приводятся к коду из заголовка; неоднозначность закрывается."
+      ],
+      "finding_ids": [
+        "S-003"
+      ],
+      "requirement_ids": [
+        "R-036"
+      ],
+      "section": "Часть B. REST API › Статусы › 200. Successful — Created",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-013",
+      "text": "Какие сценарии приёмки подтверждают выполнение перечисленных требований?",
+      "options": [
+        "Критерии приёмки будут добавлены в документ",
+        "Сценарии будут описаны в тест-кейсах QA"
+      ],
+      "option_consequences": [
+        "Для требований R-009, R-011, R-012, R-013, R-021, R-022, R-023, R-024, R-025, R-027 в документ добавляются приёмочные сценарии; пробел покрытия закрывается.",
+        "Для требований R-009, R-011, R-012, R-013, R-021, R-022, R-023, R-024, R-025, R-027 фиксируется ссылка на тест-кейсы QA; пробел покрытия в ТЗ снимается."
+      ],
+      "finding_ids": [
+        "S-006"
+      ],
+      "requirement_ids": [
+        "R-009",
+        "R-011",
+        "R-012",
+        "R-013",
+        "R-021",
+        "R-022",
+        "R-023",
+        "R-024",
+        "R-025",
+        "R-027"
+      ],
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "blocking": false,
+      "addressee": "qa"
+    },
+    {
+      "id": "Q-014",
+      "text": "Как должны обрабатываться обязательные параметры («amount») при выключенном флаге «enabled»: игнорироваться (стать необязательными) или валидироваться по диапазону?",
+      "options": [
+        "При выключенном признаке остальные параметры необязательны и не проверяются",
+        "Параметры обязательны всегда: описать, что с ними делать при выключении"
+      ],
+      "option_consequences": [
+        "В требовании R-030 уточняется, что при выключенном флаге параметры необязательны и не проверяются; пробел закрывается.",
+        "В требовании R-030 описывается обработка обязательных параметров при выключенном флаге; пробел сценария снимается."
+      ],
+      "finding_ids": [
+        "S-013"
+      ],
+      "requirement_ids": [
+        "R-030"
+      ],
+      "section": "Часть B. REST API › Параметры запроса › Query-параметры",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-015",
+      "text": "Какие фактические значения должны быть указаны в таблице раздела «Часть A. Новый функционал › Ревью требований» вместо шаблонных вариантов «Да / Нет»?",
+      "options": [
+        "Автор заполнит чек-лист до передачи в разработку",
+        "Чек-лист не используется для этой задачи: удалить его из документа"
+      ],
+      "option_consequences": [
+        "В таблице раздела «Часть A. Новый функционал › Ревью требований» проставляются фактические отметки вместо шаблона; замечание закрывается.",
+        "Неиспользуемый шаблонный чек-лист удаляется из раздела «Часть A. Новый функционал › Ревью требований»; замечание снимается."
+      ],
+      "finding_ids": [
+        "S-014"
+      ],
+      "requirement_ids": [],
+      "section": "Часть A. Новый функционал › Ревью требований",
+      "blocking": false,
+      "addressee": "business"
+    },
+    {
+      "id": "Q-016",
+      "text": "Какие данные или отметки должны быть указаны в разделе «Часть A. Новый функционал › Блок согласующих» или этот раздел следует исключить?",
+      "options": [
+        "Раздел будет заполнен до передачи в разработку",
+        "Раздел не применим к задаче: исключить его с пояснением"
+      ],
+      "option_consequences": [
+        "В разделе «Часть A. Новый функционал › Блок согласующих» добавляются недостающие требования или данные; дефект пустого раздела закрывается.",
+        "Раздел исключается или помечается как неприменимый с пояснением; замечание по разделу «Часть A. Новый функционал › Блок согласующих» снимается."
+      ],
+      "finding_ids": [
+        "S-015"
+      ],
+      "requirement_ids": [],
+      "section": "Часть A. Новый функционал › Блок согласующих",
+      "blocking": false,
+      "addressee": "business"
+    },
+    {
+      "id": "Q-017",
+      "text": "Какой результат ожидается ровно на каждой границе и на шаг за ней?",
+      "options": [],
+      "option_consequences": [],
+      "finding_ids": [
+        "S-004"
+      ],
+      "requirement_ids": [
+        "R-006"
+      ],
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "blocking": false,
+      "addressee": "qa"
+    },
+    {
+      "id": "Q-018",
+      "text": "Какой приоритет (Must have / Should have) имеет функционал установки порога уведомлений для первой очереди внедрения?",
+      "options": [
+        "Must have (обязательно для релиза MVP)",
+        "Should have (желательно, но может быть отложено)",
+        "Nice to have (опционально)"
+      ],
+      "option_consequences": [
+        "Функционал войдет в первый релиз без обсуждений",
+        "Функционал может быть сдвинут на следующие итерации",
+        "Функционал будет реализован по остаточному принципу"
+      ],
+      "finding_ids": [
+        "S-018"
+      ],
+      "requirement_ids": [
+        "R-006"
+      ],
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "blocking": false,
+      "addressee": "business"
+    },
+    {
+      "id": "Q-019",
+      "text": "В каком часовом поясе должны передаваться и фиксироваться временные метки в запросах и ответах REST API?",
+      "options": [
+        "Все временные метки передавать в формате ISO 8601 в UTC",
+        "Использовать единый часовой пояс Asia/Almaty для всех операций",
+        "Не использовать временные метки в ответах API сохранения лимита"
+      ],
+      "option_consequences": [
+        "Будет исключена двусмысленность времени операций в API",
+        "Все события будут привязаны к времени Алматы",
+        "Метки времени в API не потребуются"
+      ],
+      "finding_ids": [
+        "S-021"
+      ],
+      "requirement_ids": [
+        "R-021"
+      ],
+      "section": "Часть B. REST API › Логика работы метода",
+      "blocking": false,
+      "addressee": "analyst"
+    },
+    {
+      "id": "Q-020",
+      "text": "Для какой доли событий (перцентиля) и при какой нагрузке должно соблюдаться ограничение передачи push в течение минуты?",
+      "options": [
+        "Для 99% событий при пиковой нагрузке",
+        "Для 100% событий в любых условиях"
+      ],
+      "option_consequences": [
+        "Критерии производительности допускают задержку для 1% редких выбросов",
+        "Любое превышение 60 секунд на стенде считается дефектом"
+      ],
+      "finding_ids": [
+        "D-001"
+      ],
+      "requirement_ids": [
+        "R-011"
+      ],
+      "section": "Часть A. Новый функционал › Нефункциональные требования",
+      "blocking": false,
+      "addressee": "architect"
+    }
+  ],
+  "summary": {
+    "requirements_total": 38,
+    "requirements_by_kind": {
+      "business_goal": 1,
+      "process": 3,
+      "ui": 2,
+      "functional": 12,
+      "integration": 2,
+      "nonfunctional": 1,
+      "data": 1,
+      "other": 2,
+      "acceptance_criterion": 3,
+      "interface": 10,
+      "constraint": 1
+    },
+    "requirements_with_findings": 4,
+    "requirements_not_checked": 0,
+    "findings_total": 27,
+    "findings_by_severity": {
+      "critical": 0,
+      "major": 17,
+      "minor": 10
+    },
+    "findings_by_criterion": {
+      "set_consistent": 3,
+      "unambiguous": 1,
+      "set_complete": 14,
+      "set_validatable": 1,
+      "complete": 3,
+      "ranked": 2,
+      "traceable": 1,
+      "verifiable": 1,
+      "conforming": 1
+    },
+    "critical_ids": [],
+    "critical_by_class": {},
+    "questions_total": 20,
+    "dropped_unverified_quotes": 0,
+    "dropped_by_review": 13,
+    "requirements_in_set_findings_only": 19,
+    "merged_duplicates": 7,
+    "requirements_clean": 15,
+    "candidates_total": 47,
+    "candidates_by_source": {
+      "rules": 21,
+      "check": 11,
+      "set": 14,
+      "derived": 1,
+      "review": 0
+    },
+    "dropped_unconfirmed": 0,
+    "blocks_total": 90,
+    "blocks_in_requirements": 53,
+    "blocks_skipped": 37,
+    "blocks_structural": 0,
+    "blocks_other": 0,
+    "questions_in_findings": 27,
+    "remarks_total": 0
+  },
+  "verdict": {
+    "development": "conditional",
+    "testing": "no",
+    "headline": "Разработку можно начинать с условием: критичных дефектов нет, существенных — 17; их нужно снять ответами автора по ходу работы.",
+    "rationale": "Документ содержит критические противоречия в спецификации REST API (смешение кодов ответа, отсутствие метода чтения, несовпадение методов и типов данных), а также существенные пробелы в обработке ошибок, хранении данных и альтернативных сценариях. Начинать разработку и тестирование до внесения исправлений и интеграции ответов автора нельзя.",
+    "fix_first": [
+      {
+        "finding_id": "S-002",
+        "title": "В разделе «Часть B. REST API › Ответ» упоминается HTTP-статус 201, однако в перечне объявленных статусов (200, 400, 401, 403, 500) он отсутствует"
+      },
+      {
+        "finding_id": "S-003",
+        "title": "Заголовок «200. Successful — Created» смешивает два разных HTTP-статуса: код 200 и формулировка «created» (соответствует коду 201), что создаёт неоднозначность ожидаемого кода ответа"
+      },
+      {
+        "finding_id": "D-003",
+        "title": "Не указаны конкретные критерии проверки суммы и переключателя (например, допустимые значения enabled 0 и 1, границы суммы), что не позволяет написать полный набор тестов валидации"
+      },
+      {
+        "finding_id": "D-004",
+        "title": "Не описано поведение системы при ошибке записи в хранилище настроек (исключение базы данных, таймаут): какой код ответа и текст ошибки возвращаются клиенту"
+      },
+      {
+        "finding_id": "S-008",
+        "title": "Требование R-012 предписывает хранить данные транзакций и настроек, но не определяет срок хранения (TTL), политику архивации или удаления исторических данных за прошлые месяцы"
+      },
+      {
+        "finding_id": "S-007",
+        "title": "Sequence-диаграмма и интеграционные требования описывают успешный сценарий передачи push, но не определяют поведение при сбое или таймауте сервиса push-уведомлений"
+      },
+      {
+        "finding_id": "S-005",
+        "title": "В требованиях не определено, учитываются ли операции и отправляются ли push-уведомления для карт со статусами «заблокирована», «закрыта» или «истек срок действия»"
+      }
+    ]
+  },
+  "debug": {
+    "critic_dropped": [
+      {
+        "candidate_id": "C01",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: При ошибке валидации параметров сервис возвращает HTTP status 400 Bad Request с телом {\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"}. Пример с ошибкой из секции 200 OK удаляем и переносим структуру ошибки в описание статуса 400.",
+        "source": "llm",
+        "kind": "contradiction",
+        "criterion": "set_consistent",
+        "severity": "critical",
+        "requirement_ids": [
+          "R-034",
+          "R-036"
+        ],
+        "quote": "200. Ответ в случае успешного выполнения метода",
+        "explanation": "Под заголовком успешного статуса 200 приведён пример ответа с ошибкой, тогда как стандарт REST требует возвращать код ошибки (например, 400) для неудачных результатов валидации. Пример: Сервер возвращает HTTP-статус 200 OK, но в теле ответа передает JSON с признаком ошибки, что противоречит семантик"
+      },
+      {
+        "candidate_id": "C02",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: Для чужой и отсутствующей карты возвращается HTTP 404 Not Found, чтобы не раскрывать существование чужой карты. Добавляем 404 в перечень статусов R-037 и убираем 403 Forbidden из данного перечня.",
+        "source": "llm",
+        "kind": "contradiction",
+        "criterion": "set_consistent",
+        "severity": "critical",
+        "requirement_ids": [
+          "R-037"
+        ],
+        "quote": "403. Ответ в случае, если на указанный ресурс доступ запрещен",
+        "explanation": "В общем перечне статусов указан код 403 для запрета доступа, а в правиле для чужой карты явно зафиксирован возврат кода 404, что создает противоречие для разработчика и тестировщика. Пример: Клиент отправляет запрос для чужой карты: перечень статусов требует возвращать HTTP 403 Forbidden, а текст ос"
+      },
+      {
+        "candidate_id": "C03",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: В теле ответа REST API для обоих полей используется тип integer (например, amount: 50000, enabled: 1). Таблицу параметров ответа R-033 обновляем на тип integer для полного соответствия параметрам запроса R-030.",
+        "source": "llm",
+        "kind": "cross_part",
+        "criterion": "set_consistent",
+        "severity": "major",
+        "requirement_ids": [
+          "R-030",
+          "R-033"
+        ],
+        "quote": "amount | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге",
+        "explanation": "Тип данных поля amount в запросе указан как integer, а в таблице ответа — как string, что приводит к несоответствию контракта API и ошибкам десериализации у клиента. Пример: Клиент отправляет запрос с amount в виде целого числа (integer), а в ответе сервер возвращает amount в виде строки (string), ч"
+      },
+      {
+        "candidate_id": "C04",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: Операция сохранения настройки выполняется методом PUT /alerts/saveLimit с передачей параметров (cardId, amount, enabled) в JSON-теле запроса. Обновляем метод и описание параметров в требованиях R-020 и R-024.",
+        "source": "llm",
+        "kind": "cross_part",
+        "criterion": "set_consistent",
+        "severity": "major",
+        "requirement_ids": [
+          "R-020"
+        ],
+        "quote": "REST type | GET",
+        "explanation": "Для операции сохранения и изменения настроек зафиксирован метод GET, который по стандарту REST должен быть безопасным и не менять состояние системы, тогда как сохранение требует метода PUT или POST. Пример: Клиент вызывает эндпоинт сохранения настроек /alerts/saveLimit с помощью метода GET для измен"
+      },
+      {
+        "candidate_id": "C06",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: В теле ответа REST API для обоих полей используется тип integer (например, amount: 50000, enabled: 1). Таблицу параметров ответа R-033 обновляем на тип integer для полного соответствия параметрам запроса R-030.",
+        "source": "rule",
+        "kind": "contradiction",
+        "criterion": "set_consistent",
+        "severity": "major",
+        "requirement_ids": [
+          "R-030"
+        ],
+        "quote": "enabled | integer | 1 знак | Да | 0 или 1 | Признак включения | enabled",
+        "explanation": "Поле «enabled» имеет разные типы данных в запросе и ответе: в разделе «Часть B. REST API › Параметры запроса › Query-параметры» указан тип «integer», а в разделе «Часть B. REST API › Ответ» — «string»."
+      },
+      {
+        "candidate_id": "C10",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: Операция сохранения настройки выполняется методом PUT /alerts/saveLimit с передачей параметров (cardId, amount, enabled) в JSON-теле запроса. Обновляем метод и описание параметров в требованиях R-020 и R-024.",
+        "source": "rule",
+        "kind": "requirement",
+        "criterion": "correct",
+        "severity": "critical",
+        "requirement_ids": [
+          "R-020"
+        ],
+        "quote": "REST type | GET",
+        "explanation": "В разделе «Часть B. REST API › Общие параметры» указан безопасный HTTP-метод GET, однако описание операции «Сохранение» указывает на операцию изменения данных (RFC 9110). При этом изменяемые параметры передаются через query-строку, что нарушает семантику безопасного метода и ведёт к риску кэшировани"
+      },
+      {
+        "candidate_id": "C11",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: Для чтения текущих настроек порога и расходов используется конечная точка GET /alerts/getLimit с обязательным query-параметром cardId. Добавляем этот метод в спецификацию API, оставляя /alerts/saveLimit только для записи.",
+        "source": "llm",
+        "kind": "missing_requirement",
+        "criterion": "set_complete",
+        "severity": "critical",
+        "requirement_ids": [
+          "R-013",
+          "R-020"
+        ],
+        "quote": "Приложение читает и сохраняет настройки через дочерний документ «Уведомление о расходах по карте — REST API»",
+        "explanation": "В дочерней спецификации REST API полностью отсутствует метод для чтения текущих настроек (описан только метод сохранения), что делает невозможным выполнение чтения настроек приложением."
+      },
+      {
+        "candidate_id": "C12",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: При невалидном значении под полем «Порог, ₸» выводится сообщение «Введите целое число от 1 000 до 1 000 000 ₸» в момент потери фокуса или нажатия кнопки «Сохранить». Сообщение об ошибке исчезает сразу при изменении содержимого поля пользователем.",
+        "source": "llm",
+        "kind": "requirement",
+        "criterion": "complete",
+        "severity": "major",
+        "requirement_ids": [
+          "R-004"
+        ],
+        "quote": "При ошибке ввода сообщение появляется под полем",
+        "explanation": "В требовании не указан конкретный текст сообщения об ошибке ввода и условия его сброса или скрытия, что не позволяет однозначно реализовать и протестировать UI."
+      },
+      {
+        "candidate_id": "C13",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: При установке нового порога, который меньше или равен уже накопленным расходам, push в текущем месяце не отправляется, так как переход через порог не состоялся. Проверка достижения порога возобновится с началом следующего календарного месяца.",
+        "source": "llm",
+        "kind": "requirement",
+        "criterion": "complete",
+        "severity": "major",
+        "requirement_ids": [
+          "R-009"
+        ],
+        "quote": "Если она ниже нового порога, следующее достижение вызывает push независимо от истории предыдущей настройки",
+        "explanation": "Не описано поведение системы в случае, когда накопленная сумма расходов за текущий месяц уже равна новому порогу или превышает его в момент сохранения."
+      },
+      {
+        "candidate_id": "C14",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: Ключом идемпотентности служит идентификатор операции (transaction_id) вместе с типом события (покупка или возврат). Система хранит ключи дедупликации в кэше или таблице со сроком жизни (TTL) 30 дней, чтобы корректно обрабатывать дубли на границе месяцев.",
+        "source": "llm",
+        "kind": "requirement",
+        "criterion": "complete",
+        "severity": "major",
+        "requirement_ids": [
+          "R-014",
+          "R-013"
+        ],
+        "quote": "Повторная доставка одного события процессинга сохраняет исходный итог",
+        "explanation": "Не указан параметр, по которому определяется повторное событие (ключ идемпотентности), и срок хранения истории событий (окно дедупликации)."
+      },
+      {
+        "candidate_id": "C15",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: При недействительной или истекшей пользовательской сессии сервис возвращает HTTP 401 Unauthorized с телом {\"result\":\"ERROR\",\"message\":\"Требуется вход\"}. Поведение полностью соответствует разделу статусов 401 и единому формату ошибок.",
+        "source": "llm",
+        "kind": "requirement",
+        "criterion": "complete",
+        "severity": "major",
+        "requirement_ids": [
+          "R-021"
+        ],
+        "quote": "Проверить пользовательскую сессию",
+        "explanation": "Не указано, какой код ответа или тело возвращается при недействительной сессии, хотя в статусах упоминается 401 Unauthorized."
+      },
+      {
+        "candidate_id": "C16",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: При попытке изменить настройку чужой карты возвращается статус 404 Not Found, как указано в блоке статусов R-037. Это согласует логику метода с разделом статусов и предотвращает утечку данных о наличии карты у другого клиента.",
+        "source": "llm",
+        "kind": "requirement",
+        "criterion": "complete",
+        "severity": "major",
+        "requirement_ids": [
+          "R-022"
+        ],
+        "quote": "Проверить принадлежность карты клиенту",
+        "explanation": "Не указано явное поведение в логике метода для чужой карты, хотя в статусах (R-037) указан возврат 404. Без этого разработчик может реализовать 403 вместо 404."
+      },
+      {
+        "candidate_id": "C32",
+        "stage": "review",
+        "reason": "answered",
+        "merge_into": "",
+        "counter_quote": "Ответ автора: В сервис push передаётся сумма накопленных расходов за текущий месяц (в тенге) и последние 4 цифры карты. Используем фиксированный шаблон текста уведомления: «Расходы по карте *1234 за месяц достигли 50 000 ₸».",
+        "source": "llm",
+        "kind": "requirement",
+        "criterion": "unambiguous",
+        "severity": "major",
+        "requirement_ids": [
+          "R-010"
+        ],
+        "quote": "передать последние четыре цифры карты и сумму при достижении порога",
+        "explanation": "Формулировка «сумму при достижении порога» допускает разное толкование: передается сумма конкретной покупки, итоговая сумма накопленных расходов или значение порога; также не определен шаблон push-сообщения."
+      }
+    ]
+  },
+  "refinement": {
+    "previous_report_name": "report.json",
+    "answers_total": 20,
+    "previous_findings_by_severity": {
+      "critical": 7,
+      "major": 21,
+      "minor": 10
+    },
+    "current_findings_by_severity": {
+      "critical": 0,
+      "major": 17,
+      "minor": 10
+    },
+    "previous_findings_total": 38,
+    "current_findings_total": 27,
+    "previous_verdict_development": "no",
+    "previous_verdict_testing": "no",
+    "current_verdict_development": "conditional",
+    "current_verdict_testing": "no",
+    "previous_verdict_headline": "Начинать разработку нельзя: критичных дефектов — 7 (противоречивых — 5, неполных — 2).",
+    "current_verdict_headline": "Разработку можно начинать с условием: критичных дефектов нет, существенных — 17; их нужно снять ответами автора по ходу работы.",
+    "finding_deltas": [
+      {
+        "previous_id": "S-001",
+        "status": "closed",
+        "previous_severity": "critical",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Результат критерия приёмки (увеличение февральского счётчика для покупки от 31 января) напрямую противоречит функциональному требованию Ф-2 (R-007), где месяц…",
+        "answered_by": [
+          "Q-001"
+        ],
+        "note": "Закрыто ответом на Q-001"
+      },
+      {
+        "previous_id": "S-002",
+        "status": "closed",
+        "previous_severity": "critical",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Требование R-008 устанавливает лимит не более 1 push в календарный месяц на карту, а требование R-009 предписывает отправлять push при новом достижении порога…",
+        "answered_by": [
+          "Q-002"
+        ],
+        "note": "Закрыто ответом на Q-002"
+      },
+      {
+        "previous_id": "S-003",
+        "status": "changed",
+        "previous_severity": "critical",
+        "current_id": "S-020",
+        "current_severity": "minor",
+        "summary": "В разделе «Часть B. REST API › Общие параметры» указан безопасный HTTP-метод GET, однако описание операции «Сохранение» указывает на операцию изменения данных…",
+        "answered_by": [
+          "Q-004"
+        ],
+        "note": "Критичность: Критичный → Незначительный; изменился критерий; изменился тип расхождения; изменился состав затронутых требований; изменилась формулировка дефекта"
+      },
+      {
+        "previous_id": "S-004",
+        "status": "closed",
+        "previous_severity": "critical",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Описание статусов R-035 предписывает возвращать статус 400 при некорректных параметрах, тогда как пример под заголовком статуса 200 (R-036) демонстрирует…",
+        "answered_by": [
+          "Q-003"
+        ],
+        "note": "Закрыто ответом на Q-003"
+      },
+      {
+        "previous_id": "S-005",
+        "status": "closed",
+        "previous_severity": "critical",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Перечень статусов объявляет код 403 для этого случая, но в подразделе «403. Unsuccessful — Forbidden» предписано возвращать 404, которого нет в перечне (200…",
+        "answered_by": [
+          "Q-005"
+        ],
+        "note": "Закрыто ответом на Q-005"
+      },
+      {
+        "previous_id": "S-006",
+        "status": "changed",
+        "previous_severity": "critical",
+        "current_id": "S-009",
+        "current_severity": "major",
+        "summary": "Требование R-013 и экран UI (R-003) предусматривают чтение настроек и суммы за месяц, но спецификация API в Части B описывает только метод сохранения…",
+        "answered_by": [
+          "Q-006"
+        ],
+        "note": "Критичность: Критичный → Существенный; изменился тип расхождения; изменился состав затронутых требований; изменилась формулировка дефекта"
+      },
+      {
+        "previous_id": "S-007",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "S-001",
+        "current_severity": "major",
+        "summary": "Для суммы покупки (денежных сумм (тенге / тиыны)) используются разные единицы измерения: в разделе «Часть A. Новый функционал › Критерии приемки» указана…",
+        "answered_by": [],
+        "note": "Остаётся открытым (новый ID: S-001)"
+      },
+      {
+        "previous_id": "S-008",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Типы полей amount и enabled различаются в параметрах запроса (integer) и ответа (string).",
+        "answered_by": [
+          "Q-008"
+        ],
+        "note": "Закрыто ответом на Q-008"
+      },
+      {
+        "previous_id": "S-009",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "S-002",
+        "current_severity": "major",
+        "summary": "В разделе «Часть B. REST API › Ответ» упоминается HTTP-статус 201, однако в перечне объявленных статусов (200, 400, 401, 403, 500) он отсутствует.",
+        "answered_by": [],
+        "note": "Остаётся открытым (новый ID: S-002)"
+      },
+      {
+        "previous_id": "S-010",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "S-003",
+        "current_severity": "major",
+        "summary": "Заголовок «200. Successful — Created» смешивает два разных HTTP-статуса: код 200 и формулировка «created» (соответствует коду 201), что создаёт…",
+        "answered_by": [
+          "Q-003"
+        ],
+        "note": "Остаётся открытым (новый ID: S-003)"
+      },
+      {
+        "previous_id": "S-011",
+        "status": "changed",
+        "previous_severity": "major",
+        "current_id": "S-007",
+        "current_severity": "major",
+        "summary": "В описании процесса обработки события покупки (Sequence Diagram R-010 и BPMN R-005) отсутствует шаг проверки признака включения уведомления (enabled).",
+        "answered_by": [
+          "Q-009"
+        ],
+        "note": "Изменился тип расхождения; изменился состав затронутых требований; изменилась формулировка дефекта"
+      },
+      {
+        "previous_id": "S-012",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Функциональное требование R-006 ограничивает установку порога только для активных карт в валюте KZT, но в логике обработки метода API (R-022) проверка валюты…",
+        "answered_by": [
+          "Q-010"
+        ],
+        "note": "Закрыто ответом на Q-010"
+      },
+      {
+        "previous_id": "S-013",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Не описано поведение системы при операциях в режиме disabled=0 (ведётся ли учёт расходов при выключенном уведомлении) и реакция при переключении тумблера из…",
+        "answered_by": [
+          "Q-011"
+        ],
+        "note": "Закрыто ответом на Q-011"
+      },
+      {
+        "previous_id": "S-014",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "S-004",
+        "current_severity": "major",
+        "summary": "Для числовых границ «от 1 000 до 1 000 000» в критериях приёмки нет строк со значением ровно на границе и сразу за ней: ошибку включительности нельзя поймать…",
+        "answered_by": [
+          "Q-009",
+          "Q-010",
+          "Q-011"
+        ],
+        "note": "Остаётся открытым (новый ID: S-004)"
+      },
+      {
+        "previous_id": "S-015",
+        "status": "changed",
+        "previous_severity": "major",
+        "current_id": "S-005",
+        "current_severity": "major",
+        "summary": "Не уточнено, сбрасывается ли факт отправки push в текущем месяце, если возврат уменьшает расходы ниже порога, и будет ли отправлен push при повторном…",
+        "answered_by": [
+          "Q-012"
+        ],
+        "note": "Изменилась формулировка дефекта"
+      },
+      {
+        "previous_id": "S-016",
+        "status": "changed",
+        "previous_severity": "major",
+        "current_id": "S-006",
+        "current_severity": "major",
+        "summary": "Для требований R-009, R-010, R-011, R-012, R-013, R-014, R-021, R-022, R-023, R-024 в документе нет ни одного критерия приёмки: результат их реализации нельзя…",
+        "answered_by": [
+          "Q-009",
+          "Q-017",
+          "Q-019",
+          "Q-004",
+          "Q-018",
+          "Q-010",
+          "Q-020",
+          "Q-002",
+          "Q-016",
+          "Q-013",
+          "Q-006",
+          "Q-007"
+        ],
+        "note": "Изменился состав затронутых требований"
+      },
+      {
+        "previous_id": "S-017",
+        "status": "changed",
+        "previous_severity": "major",
+        "current_id": "S-008",
+        "current_severity": "major",
+        "summary": "В спецификации отсутствуют нефункциональные требования по информационной безопасности, аудиту изменений настроек порога клиентом, маскированию данных карты…",
+        "answered_by": [
+          "Q-013"
+        ],
+        "note": "Изменился состав затронутых требований; изменилась формулировка дефекта"
+      },
+      {
+        "previous_id": "S-018",
+        "status": "changed",
+        "previous_severity": "major",
+        "current_id": "S-010",
+        "current_severity": "major",
+        "summary": "Раздел требований к тестированию содержит текстовую заглушку «заполняются тестировщиками» вместо конкретных требований и критериев.",
+        "answered_by": [
+          "Q-014"
+        ],
+        "note": "Изменился состав затронутых требований; изменилась формулировка дефекта"
+      },
+      {
+        "previous_id": "S-019",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "S-013",
+        "current_severity": "major",
+        "summary": "В таблице параметров раздела «Часть B. REST API › Параметры запроса › Query-параметры» присутствует флаг включения/отключения «enabled» вместе с обязательными…",
+        "answered_by": [
+          "Q-008"
+        ],
+        "note": "Остаётся открытым (новый ID: S-013)"
+      },
+      {
+        "previous_id": "S-020",
+        "status": "remained",
+        "previous_severity": "minor",
+        "current_id": "S-016",
+        "current_severity": "minor",
+        "summary": "В разделе «Часть B. REST API › Параметры запроса › Request body» одновременно указан заголовок Content-Type и отмечено, что тело запроса не используется.",
+        "answered_by": [],
+        "note": "Остаётся открытым (новый ID: S-016)"
+      },
+      {
+        "previous_id": "S-021",
+        "status": "closed",
+        "previous_severity": "minor",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "В Части A и Части B используются разные наименования для одного и того же сервиса («сервис настроек» vs «AlertsController» / «хранилище настроек»).",
+        "answered_by": [],
+        "note": "Снято после повторной проверки с учётом ответов автора"
+      },
+      {
+        "previous_id": "S-022",
+        "status": "remained",
+        "previous_severity": "minor",
+        "current_id": "S-017",
+        "current_severity": "minor",
+        "summary": "В 3 разделах со схемами процессов («Часть A. Новый функционал › Требования к изменениям › BPMN схема процесса», «Часть A. Новый функционал › Sequence…",
+        "answered_by": [],
+        "note": "Остаётся открытым (новый ID: S-017)"
+      },
+      {
+        "previous_id": "S-023",
+        "status": "remained",
+        "previous_severity": "minor",
+        "current_id": "S-019",
+        "current_severity": "minor",
+        "summary": "Большинство нормативных формулировок не имеет идентификаторов: 33 из 37 без ID при наличии 4 пронумерованных требований.",
+        "answered_by": [
+          "Q-013"
+        ],
+        "note": "Остаётся открытым (новый ID: S-019)"
+      },
+      {
+        "previous_id": "S-024",
+        "status": "changed",
+        "previous_severity": "minor",
+        "current_id": "S-023",
+        "current_severity": "minor",
+        "summary": "В документе не указаны приоритеты или уровни важности требований (например, Must/Should/Could, P1–P3, высокий/средний/низкий).",
+        "answered_by": [
+          "Q-004",
+          "Q-006"
+        ],
+        "note": "Изменился состав затронутых требований"
+      },
+      {
+        "previous_id": "S-025",
+        "status": "changed",
+        "previous_severity": "minor",
+        "current_id": "S-014",
+        "current_severity": "major",
+        "summary": "В таблице раздела «Часть A. Новый функционал › Ревью требований» обнаружен незаполненный шаблон: варианты «Да / Нет» повторяются без выбора значения в 14…",
+        "answered_by": [],
+        "note": "Критичность: Незначительный → Существенный"
+      },
+      {
+        "previous_id": "S-026",
+        "status": "changed",
+        "previous_severity": "minor",
+        "current_id": "S-015",
+        "current_severity": "major",
+        "summary": "Раздел «Часть A. Новый функционал › Блок согласующих» не содержит заполненных требований или данных.",
+        "answered_by": [],
+        "note": "Критичность: Незначительный → Существенный"
+      },
+      {
+        "previous_id": "S-027",
+        "status": "remained",
+        "previous_severity": "minor",
+        "current_id": "S-022",
+        "current_severity": "minor",
+        "summary": "В строке таблицы раздела «Часть B. REST API › Общие параметры» указано значение-заглушка «—» вместо конкретного параметра.",
+        "answered_by": [],
+        "note": "Остаётся открытым (новый ID: S-022)"
+      },
+      {
+        "previous_id": "D-001",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "В требовании не указан конкретный текст сообщения об ошибке ввода и условия его сброса или скрытия, что не позволяет однозначно реализовать и протестировать UI.",
+        "answered_by": [
+          "Q-015"
+        ],
+        "note": "Закрыто ответом на Q-015"
+      },
+      {
+        "previous_id": "D-002",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Не описано поведение системы в случае, когда накопленная сумма расходов за текущий месяц уже равна новому порогу или превышает его в момент сохранения.",
+        "answered_by": [
+          "Q-016"
+        ],
+        "note": "Закрыто ответом на Q-016"
+      },
+      {
+        "previous_id": "D-003",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Формулировка «сумму при достижении порога» допускает разное толкование: передается сумма конкретной покупки, итоговая сумма накопленных расходов или значение…",
+        "answered_by": [
+          "Q-017"
+        ],
+        "note": "Закрыто ответом на Q-017"
+      },
+      {
+        "previous_id": "D-004",
+        "status": "remained",
+        "previous_severity": "minor",
+        "current_id": "D-001",
+        "current_severity": "minor",
+        "summary": "Не указаны перцентиль (SLA) и условия нагрузки, при которых гарантируется передача push в течение минуты, что не позволяет составить однозначный профиль…",
+        "answered_by": [
+          "Q-013"
+        ],
+        "note": "Остаётся открытым (новый ID: D-001)"
+      },
+      {
+        "previous_id": "D-005",
+        "status": "closed",
+        "previous_severity": "critical",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "В дочерней спецификации REST API полностью отсутствует метод для чтения текущих настроек (описан только метод сохранения), что делает невозможным выполнение…",
+        "answered_by": [
+          "Q-007"
+        ],
+        "note": "Закрыто ответом на Q-007"
+      },
+      {
+        "previous_id": "D-006",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Не указан параметр, по которому определяется повторное событие (ключ идемпотентности), и срок хранения истории событий (окно дедупликации).",
+        "answered_by": [
+          "Q-018"
+        ],
+        "note": "Закрыто ответом на Q-018"
+      },
+      {
+        "previous_id": "D-007",
+        "status": "remained",
+        "previous_severity": "minor",
+        "current_id": "D-002",
+        "current_severity": "minor",
+        "summary": "Описание содержит информацию о незаполненных метаданных и листе ревью, что нарушает правила оформления и версионирования документа.",
+        "answered_by": [
+          "Q-014"
+        ],
+        "note": "Остаётся открытым (новый ID: D-002)"
+      },
+      {
+        "previous_id": "D-008",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Не указано, какой код ответа или тело возвращается при недействительной сессии, хотя в статусах упоминается 401 Unauthorized.",
+        "answered_by": [
+          "Q-019"
+        ],
+        "note": "Закрыто ответом на Q-019"
+      },
+      {
+        "previous_id": "D-009",
+        "status": "closed",
+        "previous_severity": "major",
+        "current_id": null,
+        "current_severity": null,
+        "summary": "Не указано явное поведение в логике метода для чужой карты, хотя в статусах (R-037) указан возврат 404. Без этого разработчик может реализовать 403 вместо 404.",
+        "answered_by": [
+          "Q-020"
+        ],
+        "note": "Закрыто ответом на Q-020"
+      },
+      {
+        "previous_id": "D-010",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "D-003",
+        "current_severity": "major",
+        "summary": "Не указаны конкретные критерии проверки суммы и переключателя (например, допустимые значения enabled 0 и 1, границы суммы), что не позволяет написать полный…",
+        "answered_by": [],
+        "note": "Остаётся открытым (новый ID: D-003)"
+      },
+      {
+        "previous_id": "D-011",
+        "status": "remained",
+        "previous_severity": "major",
+        "current_id": "D-004",
+        "current_severity": "major",
+        "summary": "Не описано поведение системы при ошибке записи в хранилище настроек (исключение базы данных, таймаут): какой код ответа и текст ошибки возвращаются клиенту.",
+        "answered_by": [
+          "Q-004"
+        ],
+        "note": "Остаётся открытым (новый ID: D-004)"
+      }
+    ],
+    "question_effects": [
+      {
+        "question_id": "Q-001",
+        "question_text": "По какой дате операция относится к месячному счётчику: по дате совершения или по дате проведения в процессинге?",
+        "answer": "Операция относится к месячному счётчику по дате совершения покупки в часовом поясе Алматы (UTC+5). Исправляем критерий приёмки R-017: покупка 31 января в 23:58, проведённая 1 февраля, учитывается в январском счётчике на 4 000 ₸.",
+        "finding_ids": [
+          "S-001"
+        ],
+        "closed_ids": [
+          "S-001"
+        ],
+        "changed_ids": [],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: S-001"
+      },
+      {
+        "question_id": "Q-002",
+        "question_text": "Отправлять ли повторное push-уведомление в одном и том же календарном месяце, если клиент изменил порог на более высокий и снова достиг его?",
+        "answer": "Да, изменение значения порога сбрасывает ограничение в текущем календарном месяце, и при достижении нового порога push отправляется повторно. В требование R-008 добавляем уточнение, что лимит «1 push в месяц» действует при неизменном пороге.",
+        "finding_ids": [
+          "S-002",
+          "S-016"
+        ],
+        "closed_ids": [
+          "S-002"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: S-002; изменилось: S-016"
+      },
+      {
+        "question_id": "Q-003",
+        "question_text": "Какой HTTP-код ответа должен возвращать сервис при ошибке валидации параметров (например, неверная сумма порога)?",
+        "answer": "При ошибке валидации параметров сервис возвращает HTTP status 400 Bad Request с телом {\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"}. Пример с ошибкой из секции 200 OK удаляем и переносим структуру ошибки в описание статуса 400.",
+        "finding_ids": [
+          "S-004",
+          "S-010"
+        ],
+        "closed_ids": [
+          "S-004"
+        ],
+        "changed_ids": [],
+        "remained_ids": [
+          "S-010"
+        ],
+        "effect": "Закрыто ответом: S-004; осталось: S-010"
+      },
+      {
+        "question_id": "Q-004",
+        "question_text": "Какой HTTP-метод (POST, PUT или PATCH) должен использоваться вместо GET для операции изменения данных в разделе «Часть B. REST API › Общие параметры»?",
+        "answer": "Операция сохранения настройки выполняется методом PUT /alerts/saveLimit с передачей параметров (cardId, amount, enabled) в JSON-теле запроса. Обновляем метод и описание параметров в требованиях R-020 и R-024.",
+        "finding_ids": [
+          "S-003",
+          "S-016",
+          "S-024",
+          "D-011"
+        ],
+        "closed_ids": [],
+        "changed_ids": [
+          "S-003",
+          "S-016",
+          "S-024"
+        ],
+        "remained_ids": [
+          "D-011"
+        ],
+        "effect": "Изменилось: S-003 (Критичный → Незначительный), S-016, S-024; осталось: D-011"
+      },
+      {
+        "question_id": "Q-005",
+        "question_text": "Какой код возвращается в ситуации «Для чужой карты возвращается 404, как и для отсутствующей карты. 404»: 403, как в перечне статусов, или 404, как в тексте подраздела?",
+        "answer": "Для чужой и отсутствующей карты возвращается HTTP 404 Not Found, чтобы не раскрывать существование чужой карты. Добавляем 404 в перечень статусов R-037 и убираем 403 Forbidden из данного перечня.",
+        "finding_ids": [
+          "S-005"
+        ],
+        "closed_ids": [
+          "S-005"
+        ],
+        "changed_ids": [],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: S-005"
+      },
+      {
+        "question_id": "Q-006",
+        "question_text": "Каким эндпоинтом REST API мобильное приложение должно получать текущий порог, статус переключателя и накопленные расходы за месяц?",
+        "answer": "Для получения текущего порога, статуса переключателя и накопленных расходов за месяц используется отдельный метод GET /alerts/getLimit. Полную спецификацию этого метода добавляем в Часть B.",
+        "finding_ids": [
+          "S-006",
+          "S-016",
+          "S-024"
+        ],
+        "closed_ids": [],
+        "changed_ids": [
+          "S-006",
+          "S-016",
+          "S-024"
+        ],
+        "remained_ids": [],
+        "effect": "Изменилось: S-006 (Критичный → Существенный), S-016, S-024"
+      },
+      {
+        "question_id": "Q-007",
+        "question_text": "Какая конечная точка (endpoint) REST API должна использоваться для чтения текущих настроек порога уведомления?",
+        "answer": "Для чтения текущих настроек порога и расходов используется конечная точка GET /alerts/getLimit с обязательным query-параметром cardId. Добавляем этот метод в спецификацию API, оставляя /alerts/saveLimit только для записи.",
+        "finding_ids": [
+          "D-005",
+          "S-016"
+        ],
+        "closed_ids": [
+          "D-005"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-005; изменилось: S-016"
+      },
+      {
+        "question_id": "Q-008",
+        "question_text": "Какой тип данных должен быть у полей amount и enabled в теле ответа REST API?",
+        "answer": "В теле ответа REST API для обоих полей используется тип integer (например, amount: 50000, enabled: 1). Таблицу параметров ответа R-033 обновляем на тип integer для полного соответствия параметрам запроса R-030.",
+        "finding_ids": [
+          "S-008",
+          "S-019"
+        ],
+        "closed_ids": [
+          "S-008"
+        ],
+        "changed_ids": [],
+        "remained_ids": [
+          "S-019"
+        ],
+        "effect": "Закрыто ответом: S-008; осталось: S-019"
+      },
+      {
+        "question_id": "Q-009",
+        "question_text": "Должен ли сервис расходов проверять признак включения уведомления (enabled) перед отправкой push?",
+        "answer": "Да, сервис расходов проверяет признак включения уведомления и отправляет push только при условии enabled == 1. В Sequence Diagram (R-010) и BPMN (R-005) добавляем блок проверки флага enabled.",
+        "finding_ids": [
+          "S-011",
+          "S-014",
+          "S-016"
+        ],
+        "closed_ids": [],
+        "changed_ids": [
+          "S-011",
+          "S-016"
+        ],
+        "remained_ids": [
+          "S-014"
+        ],
+        "effect": "Изменилось: S-011, S-016; осталось: S-014"
+      },
+      {
+        "question_id": "Q-010",
+        "question_text": "Должна ли логика REST API проверять валюту и статус активности карты при сохранении порога?",
+        "answer": "Да, логика REST API на сервере проверяет, что карта открыта в валюте KZT и имеет активный статус, иначе возвращает ошибку 400 Bad Request. Этот шаг валидации фиксируем в алгоритме метода (R-022).",
+        "finding_ids": [
+          "S-012",
+          "S-014",
+          "S-016"
+        ],
+        "closed_ids": [
+          "S-012"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [
+          "S-014"
+        ],
+        "effect": "Закрыто ответом: S-012; изменилось: S-016; осталось: S-014"
+      },
+      {
+        "question_id": "Q-011",
+        "question_text": "Должна ли система отправлять push при включении уведомления (enabled=1), если накопленные расходы текущего месяца уже равны порогу или превышают его?",
+        "answer": "Не отправлять push при самом включении (enabled=1), игнорируя прошлые накопления и ожидая следующей покупки. Уведомление отправляется только в момент события покупки, при котором накопленные расходы переходят от суммы ниже порога к значению не ниже порога.",
+        "finding_ids": [
+          "S-013",
+          "S-014"
+        ],
+        "closed_ids": [
+          "S-013"
+        ],
+        "changed_ids": [],
+        "remained_ids": [
+          "S-014"
+        ],
+        "effect": "Закрыто ответом: S-013; осталось: S-014"
+      },
+      {
+        "question_id": "Q-012",
+        "question_text": "Отправляется ли push повторно в одном календарном месяце, если из-за возврата расходы упали ниже порога, а новая покупка снова его превысила?",
+        "answer": "Нет, ограничение «максимум один push в месяц» при неизменном пороге действует независимо от возвратов. Возврат уменьшает сумму расходов в счётчике, но не сбрасывает признак уже отправленного в этом месяце push-уведомления.",
+        "finding_ids": [
+          "S-015"
+        ],
+        "closed_ids": [],
+        "changed_ids": [
+          "S-015"
+        ],
+        "remained_ids": [],
+        "effect": "Изменилось: S-015"
+      },
+      {
+        "question_id": "Q-013",
+        "question_text": "Какие требования по аудиту изменений порога и маскированию карточных данных должны быть зафиксированы в нефункциональном разделе?",
+        "answer": "В нефункциональные требования добавляем обязательное аудит-логирование всех изменений порога и флага enabled (пользователь, карта, старое и новое значения, время) и запрет на запись полного номера карты в логи с обязательным маскированием (например, ****1234).",
+        "finding_ids": [
+          "S-017",
+          "S-016",
+          "S-023",
+          "D-004"
+        ],
+        "closed_ids": [],
+        "changed_ids": [
+          "S-017",
+          "S-016"
+        ],
+        "remained_ids": [
+          "S-023",
+          "D-004"
+        ],
+        "effect": "Изменилось: S-017, S-016; осталось: S-023, D-004"
+      },
+      {
+        "question_id": "Q-014",
+        "question_text": "Какие требования к тестированию и тестовым окружениям должны быть внесены в данный раздел?",
+        "answer": "Заполняем раздел требованиями к тестовым стендам (Dev/Stage с эмуляторами процессинга и push-шлюза в часовом поясе Asia/Almaty) и тестовым данным: карты KZT и не-KZT, активные и заблокированные карты, граничные пороги 1 000 и 1 000 000 ₸, операции на стыке месяцев, возвраты и дубли событий.",
+        "finding_ids": [
+          "S-018",
+          "D-007"
+        ],
+        "closed_ids": [],
+        "changed_ids": [
+          "S-018"
+        ],
+        "remained_ids": [
+          "D-007"
+        ],
+        "effect": "Изменилось: S-018; осталось: D-007"
+      },
+      {
+        "question_id": "Q-015",
+        "question_text": "Какой текст сообщения об ошибке должен отображаться под полем «Порог, ₸» при невалидном значении и в какой момент он исчезает?",
+        "answer": "При невалидном значении под полем «Порог, ₸» выводится сообщение «Введите целое число от 1 000 до 1 000 000 ₸» в момент потери фокуса или нажатия кнопки «Сохранить». Сообщение об ошибке исчезает сразу при изменении содержимого поля пользователем.",
+        "finding_ids": [
+          "D-001"
+        ],
+        "closed_ids": [
+          "D-001"
+        ],
+        "changed_ids": [],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-001"
+      },
+      {
+        "question_id": "Q-016",
+        "question_text": "Что происходит, если клиент устанавливает новый порог, значение которого меньше или равно уже накопленным расходам за текущий месяц?",
+        "answer": "При установке нового порога, который меньше или равен уже накопленным расходам, push в текущем месяце не отправляется, так как переход через порог не состоялся. Проверка достижения порога возобновится с началом следующего календарного месяца.",
+        "finding_ids": [
+          "D-002",
+          "S-016"
+        ],
+        "closed_ids": [
+          "D-002"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-002; изменилось: S-016"
+      },
+      {
+        "question_id": "Q-017",
+        "question_text": "Какая именно сумма (сумма покупки, текущий итог расходов или порог) передается в сервис push, и каков текст отправляемого уведомления?",
+        "answer": "В сервис push передаётся сумма накопленных расходов за текущий месяц (в тенге) и последние 4 цифры карты. Используем фиксированный шаблон текста уведомления: «Расходы по карте *1234 за месяц достигли 50 000 ₸».",
+        "finding_ids": [
+          "D-003",
+          "S-016"
+        ],
+        "closed_ids": [
+          "D-003"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-003; изменилось: S-016"
+      },
+      {
+        "question_id": "Q-018",
+        "question_text": "Какой атрибут события является ключом идемпотентности и в течение какого времени система хранит ключи для дедупликации?",
+        "answer": "Ключом идемпотентности служит идентификатор операции (transaction_id) вместе с типом события (покупка или возврат). Система хранит ключи дедупликации в кэше или таблице со сроком жизни (TTL) 30 дней, чтобы корректно обрабатывать дубли на границе месяцев.",
+        "finding_ids": [
+          "D-006",
+          "S-016"
+        ],
+        "closed_ids": [
+          "D-006"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-006; изменилось: S-016"
+      },
+      {
+        "question_id": "Q-019",
+        "question_text": "Какой ответ должен возвращаться при недействительной или истекшей сессии?",
+        "answer": "При недействительной или истекшей пользовательской сессии сервис возвращает HTTP 401 Unauthorized с телом {\"result\":\"ERROR\",\"message\":\"Требуется вход\"}. Поведение полностью соответствует разделу статусов 401 и единому формату ошибок.",
+        "finding_ids": [
+          "D-008",
+          "S-016"
+        ],
+        "closed_ids": [
+          "D-008"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-008; изменилось: S-016"
+      },
+      {
+        "question_id": "Q-020",
+        "question_text": "Какой статус должен возвращаться при попытке изменить настройку чужой карты?",
+        "answer": "При попытке изменить настройку чужой карты возвращается статус 404 Not Found, как указано в блоке статусов R-037. Это согласует логику метода с разделом статусов и предотвращает утечку данных о наличии карты у другого клиента.",
+        "finding_ids": [
+          "D-009",
+          "S-016"
+        ],
+        "closed_ids": [
+          "D-009"
+        ],
+        "changed_ids": [
+          "S-016"
+        ],
+        "remained_ids": [],
+        "effect": "Закрыто ответом: D-009; изменилось: S-016"
+      }
+    ]
+  }
+}
