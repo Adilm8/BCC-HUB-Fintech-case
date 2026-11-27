@@ -1,0 +1,11 @@
+{
+  "seq": 4,
+  "stage": "check",
+  "prompt_sha256": "5ad9cbff78e4fc53f1873a70d3f2fd697ab7d170e15187e4d3f5f414622147ce",
+  "prompt_chars": 36019,
+  "model": "google/gemini-3.8-flash",
+  "text": "",
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "truncated": false
+}
