@@ -212,13 +212,13 @@ def test_empty_test_section_is_major_when_acceptance_criteria_exist():
     assert c2.severity == Severity.CRITICAL
 
 
-def test_round6_bucket_and_class_rules():
+def test_bucket_and_class_rules():
     from validator.models import Criterion, DefectClass, defect_class_for
 
     assert defect_class_for(Criterion.SET_COMPLETE, "cross_part") == DefectClass.INCOMPLETE
 
 
-def test_round6_meta_rows_and_preamble_are_skipped():
+def test_meta_rows_and_preamble_are_skipped():
     from validator.models import RawDocument
 
     text = ("# Заявки\n\nВводная заметка о комплекте документов.\n\n## Часть 1\n\n### Общие сведения\n\n"
@@ -231,7 +231,7 @@ def test_round6_meta_rows_and_preamble_are_skipped():
     assert any(s.reason == "meta" for s in rep.skipped_blocks)
 
 
-def test_round6_options_reset_when_critic_rewrites_question():
+def test_options_reset_when_critic_rewrites_question():
     def check(prompt, schema):
         out = default_check(prompt, schema)
         for r in out["results"]:
@@ -251,7 +251,7 @@ def test_round6_options_reset_when_critic_rewrites_question():
     assert rep.findings and all(not f.answer_options for f in rep.findings)
 
 
-def test_round6_sha256_is_of_the_file_bytes(tmp_path):
+def test_sha256_is_of_the_file_bytes(tmp_path):
     import hashlib
 
     from validator.loaders import load_document
@@ -290,7 +290,7 @@ def _ev(q, b, section="s"):
     return Evidence(quote=q, section=section, block_ids=[b], quote_status=QuoteStatus.VERIFIED)
 
 
-def test_round7_status_code_from_example_heading_is_critical():
+def test_status_code_from_example_heading_is_critical():
     c = pp.Candidate("set_consistent", Severity.MAJOR,
                      [_ev('{"result":"ERROR","message":"Проверьте данные"}', "B2", "API › 200. Успешный ответ"),
                       _ev("400. Ответ, если параметры заполнены неверно", "B1", "API › Статусы")],
@@ -300,7 +300,7 @@ def test_round7_status_code_from_example_heading_is_critical():
     assert c.severity == Severity.CRITICAL
 
 
-def test_round7_single_place_is_not_a_contradiction():
+def test_single_place_is_not_a_contradiction():
     c = pp.Candidate("set_consistent", Severity.MAJOR, [_ev("Флаг задаётся в настройках клиента", "B1")],
                      "Флаг не учитывается при отправке, поведение при выключенном флаге не описано.", "r", "q?",
                      [], [], "llm", set_check="contradiction")
@@ -308,7 +308,7 @@ def test_round7_single_place_is_not_a_contradiction():
     assert c.set_check == "other"
 
 
-def test_round7_own_gap_is_not_absorbed_and_same_quotes_merge():
+def test_own_gap_is_not_absorbed_and_same_quotes_merge():
     q1, q2 = _ev("Лимит действует один раз в месяц", "B1"), _ev("После смены лимита событие повторяется", "B2")
     contra = pp.Candidate("set_consistent", Severity.CRITICAL, [q1, q2], "Два места требуют разного.", "r", "q?",
                           [], ["R-001", "R-002"], "llm", set_check="contradiction")
@@ -320,7 +320,7 @@ def test_round7_own_gap_is_not_absorbed_and_same_quotes_merge():
     assert len(kept) == 2 and gap in kept
 
 
-def test_round7_rule_questions_get_owner_and_options():
+def test_rule_questions_get_owner_and_options():
     ev = _ev("Да / Нет", "B1", "Ревью требований")
     c = pp.Candidate("set_complete", Severity.MAJOR, [ev], "Чек-лист ревью не заполнен: стоят шаблонные варианты.",
                      "r", "Кто заполнит чек-лист?", [], [], "rule", set_check="missing_requirement",
@@ -329,7 +329,7 @@ def test_round7_rule_questions_get_owner_and_options():
     assert sets[0].addressee == "business" and len(sets[0].answer_options) == 2
 
 
-def test_round7_quote_does_not_cross_a_section_heading():
+def test_quote_does_not_cross_a_section_heading():
     from validator.models import RawDocument
     from validator.pipeline.quotes import QuoteIndex
     from validator.structure import parse_structure
@@ -340,7 +340,7 @@ def test_round7_quote_does_not_cross_a_section_heading():
     assert idx.find("Конец раздела первого B Начало раздела второго") is None
 
 
-def test_round9_plural_and_single_card():
+def test_plural_and_single_card():
     from validator.report.markdown import _plural
 
     assert _plural(41, "вопрос", "вопроса", "вопросов") == "41 вопрос"
@@ -352,7 +352,7 @@ def test_round9_plural_and_single_card():
         assert md.count(f"] {f.id} —") <= 1
 
 
-def test_round9_questions_text_and_options():
+def test_questions_text_and_options():
     ev = _ev("заполняются тестировщиками", "B9", "Требования к тестированию › Тестирование требований")
     c = pp.Candidate("set_complete", Severity.CRITICAL, [ev], "В разделе тестирования стоит заглушка.", "r",
                      "Кто заполнит раздел?", [], [], "rule", set_check="empty_section", rule="placeholder")
