@@ -1,0 +1,464 @@
+{
+  "schema_version": "1.0",
+  "run": {
+    "document_title": "Уведомление о расходах по карте",
+    "document_name": "requirements.md",
+    "document_format": "md",
+    "document_sha256": "3f1c0d5e9a7b2c4d6e8f00112233445566778899aabbccddeeff001122334455",
+    "started_at": "2026-11-27T11:05:00+05:00",
+    "finished_at": "2026-11-27T11:08:32.400000+05:00",
+    "duration_seconds": 212.4,
+    "provider": "anthropic",
+    "models_used": [
+      "claude-sonnet-5-5"
+    ],
+    "agent_version": "0.1.0 (4c572b5)",
+    "profile": "deep",
+    "llm_calls": 6,
+    "status": "complete",
+    "stages": [
+      {
+        "key": "load",
+        "title": "Чтение документа",
+        "state": "done",
+        "detail": "",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.02
+      },
+      {
+        "key": "structure",
+        "title": "Разбор структуры",
+        "state": "done",
+        "detail": "22 раздела, 120 блоков",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.01
+      },
+      {
+        "key": "prechecks",
+        "title": "Проверки по правилам",
+        "state": "done",
+        "detail": "1 находка, 9 подсказок",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.01
+      },
+      {
+        "key": "extract",
+        "title": "Нарезка требований",
+        "state": "done",
+        "detail": "",
+        "model": "claude-sonnet-5-5",
+        "llm_calls": 1,
+        "input_tokens": 9100,
+        "output_tokens": 4200,
+        "seconds": 41.3
+      },
+      {
+        "key": "check",
+        "title": "Проверка каждого требования",
+        "state": "done",
+        "detail": "2 батча",
+        "model": "claude-sonnet-5-5",
+        "llm_calls": 2,
+        "input_tokens": 21000,
+        "output_tokens": 9800,
+        "seconds": 73.0
+      },
+      {
+        "key": "set_check",
+        "title": "Проверка набора требований",
+        "state": "done",
+        "detail": "",
+        "model": "claude-sonnet-5-5",
+        "llm_calls": 2,
+        "input_tokens": 20500,
+        "output_tokens": 7600,
+        "seconds": 66.1
+      },
+      {
+        "key": "review",
+        "title": "Критический пересмотр",
+        "state": "done",
+        "detail": "",
+        "model": "claude-sonnet-5-5",
+        "llm_calls": 1,
+        "input_tokens": 14000,
+        "output_tokens": 3100,
+        "seconds": 30.8
+      },
+      {
+        "key": "assemble",
+        "title": "Сборка отчёта",
+        "state": "done",
+        "detail": "",
+        "model": null,
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "seconds": 0.05
+      }
+    ],
+    "standards": [
+      "ISO/IEC/IEEE 29148:2018",
+      "IEEE 830-1998"
+    ],
+    "warnings": []
+  },
+  "requirements": [
+    {
+      "id": "R-001",
+      "doc_id": "Ф-1",
+      "id_assigned": false,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "block_ids": [
+        "B031"
+      ],
+      "title": "Клиент задаёт порог от 1 000 до 1 000 000 ₸",
+      "quote": "Держатель активной карты KZT задаёт целый порог от 1 000 до 1 000 000 ₸ включительно. По умолчанию уведомление выключено.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-002",
+      "doc_id": "Ф-3",
+      "id_assigned": false,
+      "kind": "functional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "block_ids": [
+        "B033"
+      ],
+      "title": "Push при достижении порога, не чаще раза в месяц",
+      "quote": "Когда расходы переходят от суммы ниже порога к сумме, равной порогу или выше, клиент получает push. На карту приходится максимум один такой push за календарный месяц.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-003",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "nonfunctional",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Нефункциональные требования",
+      "block_ids": [
+        "B037"
+      ],
+      "title": "Передача push в течение минуты",
+      "quote": "Сервис передаёт push на отправку в течение минуты после получения события.",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-004",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "acceptance_criterion",
+      "part": "Часть A. Новый функционал",
+      "section": "Часть A. Новый функционал › Критерии приемки",
+      "block_ids": [
+        "B046"
+      ],
+      "title": "Достижение порога покупкой",
+      "quote": "Расходы 48 500 ₸, порог 50 000 ₸ | Провести покупку на 1 500 ₸ | Итог 50 000 ₸ и один push",
+      "check_status": "checked",
+      "source": "llm"
+    },
+    {
+      "id": "R-005",
+      "doc_id": null,
+      "id_assigned": true,
+      "kind": "interface",
+      "part": "Часть B. REST API",
+      "section": "Часть B. REST API › Общие параметры",
+      "block_ids": [
+        "B079"
+      ],
+      "title": "Метод сохранения порога",
+      "quote": "REST type | GET",
+      "check_status": "not_checked",
+      "source": "llm"
+    }
+  ],
+  "skipped_blocks": [
+    {
+      "block_id": "B010",
+      "reason": "meta",
+      "text": "Задача в JIRA | Практикум без Jira-задачи"
+    }
+  ],
+  "findings": [
+    {
+      "id": "D-001",
+      "criterion": "verifiable",
+      "severity": "major",
+      "defect_class": "unverifiable",
+      "evidence": [
+        {
+          "quote": "в течение минуты после получения события",
+          "section": "Часть A. Новый функционал › Нефункциональные требования",
+          "requirement_id": "R-003",
+          "block_ids": [
+            "B037"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Не указано, для какой доли событий и при какой нагрузке действует предел в одну минуту; тестировщик не сможет однозначно принять требование.",
+      "recommendation": "Указать перцентиль (например, 95-й), нагрузку в событиях в секунду и точку отсчёта времени.",
+      "clarifying_question": "Для какой доли событий и при какой нагрузке должна выполняться передача за одну минуту?",
+      "answer_options": [
+        "95% событий при штатной нагрузке",
+        "99% событий при пиковой нагрузке",
+        "Все события без исключения"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "requirement_ids": [
+        "R-003"
+      ],
+      "quote": "в течение минуты после получения события",
+      "section": "Часть A. Новый функционал › Нефункциональные требования"
+    },
+    {
+      "id": "D-002",
+      "criterion": "complete",
+      "severity": "minor",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "По умолчанию уведомление выключено.",
+          "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+          "requirement_id": "R-001",
+          "block_ids": [
+            "B031"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Не задано значение порога по умолчанию при первом включении уведомления.",
+      "recommendation": "Указать начальное значение поля «Порог» или требование обязательного ввода.",
+      "clarifying_question": "Какое значение порога показывается при первом включении уведомления?",
+      "answer_options": [],
+      "source": "llm",
+      "review_note": null,
+      "requirement_ids": [
+        "R-001"
+      ],
+      "quote": "По умолчанию уведомление выключено.",
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования"
+    }
+  ],
+  "set_findings": [
+    {
+      "id": "S-001",
+      "criterion": "set_consistent",
+      "severity": "critical",
+      "defect_class": "contradictory",
+      "evidence": [
+        {
+          "quote": "Description | Сохранение порога. Функциональные требования: чтение порога",
+          "section": "Часть B. REST API › Общие параметры",
+          "requirement_id": "R-005",
+          "block_ids": [
+            "B078"
+          ],
+          "quote_status": "verified"
+        },
+        {
+          "quote": "Приложение читает и сохраняет настройки через дочерний документ",
+          "section": "Часть A. Новый функционал › Требования к интеграции",
+          "requirement_id": null,
+          "block_ids": [
+            "B039"
+          ],
+          "quote_status": "repaired"
+        }
+      ],
+      "explanation": "Часть A требует чтения и сохранения настроек через API, а часть B описывает один метод, назначение которого противоречит само себе; операции чтения нет.",
+      "recommendation": "Описать в части B отдельные операции чтения и сохранения порога с методами и параметрами.",
+      "clarifying_question": "Какой метод API приложение использует для чтения текущего порога?",
+      "answer_options": [
+        "Отдельный GET-метод чтения",
+        "Чтение входит в ответ метода сохранения"
+      ],
+      "source": "llm",
+      "review_note": null,
+      "set_check": "cross_part",
+      "requirement_ids": [
+        "R-005"
+      ],
+      "cross_part": true,
+      "quote": "Description | Сохранение порога. Функциональные требования: чтение порога",
+      "section": "Часть B. REST API › Общие параметры"
+    },
+    {
+      "id": "S-002",
+      "criterion": "set_complete",
+      "severity": "major",
+      "defect_class": "incomplete",
+      "evidence": [
+        {
+          "quote": "заполняются тестировщиками",
+          "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований",
+          "requirement_id": null,
+          "block_ids": [
+            "B042"
+          ],
+          "quote_status": "verified"
+        }
+      ],
+      "explanation": "Раздел требований к тестированию содержит только заглушку.",
+      "recommendation": "Заполнить раздел или пометить его как неприменимый.",
+      "clarifying_question": "Кто и к какому сроку заполняет раздел «Тестирование требований»?",
+      "answer_options": [],
+      "source": "rule",
+      "review_note": null,
+      "set_check": "empty_section",
+      "requirement_ids": [],
+      "cross_part": false,
+      "quote": "заполняются тестировщиками",
+      "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований"
+    }
+  ],
+  "coverage": [
+    {
+      "requirement_id": "R-001",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": "Нет критерия на границы порога"
+    },
+    {
+      "requirement_id": "R-002",
+      "acceptance_ids": [
+        "R-004"
+      ],
+      "status": "partial",
+      "note": "Не проверено ограничение одного push в месяц"
+    },
+    {
+      "requirement_id": "R-003",
+      "acceptance_ids": [],
+      "status": "none",
+      "note": ""
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q-001",
+      "text": "Какой метод API приложение использует для чтения текущего порога?",
+      "options": [
+        "Отдельный GET-метод чтения",
+        "Чтение входит в ответ метода сохранения"
+      ],
+      "finding_ids": [
+        "S-001"
+      ],
+      "requirement_ids": [
+        "R-005"
+      ],
+      "section": "Часть B. REST API › Общие параметры",
+      "blocking": true
+    },
+    {
+      "id": "Q-002",
+      "text": "Для какой доли событий и при какой нагрузке должна выполняться передача за одну минуту?",
+      "options": [
+        "95% событий при штатной нагрузке",
+        "99% событий при пиковой нагрузке",
+        "Все события без исключения"
+      ],
+      "finding_ids": [
+        "D-001"
+      ],
+      "requirement_ids": [
+        "R-003"
+      ],
+      "section": "Часть A. Новый функционал › Нефункциональные требования",
+      "blocking": false
+    },
+    {
+      "id": "Q-003",
+      "text": "Кто и к какому сроку заполняет раздел «Тестирование требований»?",
+      "options": [],
+      "finding_ids": [
+        "S-002"
+      ],
+      "requirement_ids": [],
+      "section": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований",
+      "blocking": false
+    },
+    {
+      "id": "Q-004",
+      "text": "Какое значение порога показывается при первом включении уведомления?",
+      "options": [],
+      "finding_ids": [
+        "D-002"
+      ],
+      "requirement_ids": [
+        "R-001"
+      ],
+      "section": "Часть A. Новый функционал › Требования к изменениям › Функциональные требования",
+      "blocking": false
+    }
+  ],
+  "summary": {
+    "requirements_total": 5,
+    "requirements_by_kind": {
+      "functional": 2,
+      "nonfunctional": 1,
+      "acceptance_criterion": 1,
+      "interface": 1
+    },
+    "requirements_with_findings": 3,
+    "requirements_not_checked": 1,
+    "findings_total": 4,
+    "findings_by_severity": {
+      "critical": 1,
+      "major": 2,
+      "minor": 1
+    },
+    "findings_by_criterion": {
+      "verifiable": 1,
+      "complete": 1,
+      "set_consistent": 1,
+      "set_complete": 1
+    },
+    "critical_ids": [
+      "S-001"
+    ],
+    "critical_by_class": {
+      "contradictory": [
+        "S-001"
+      ]
+    },
+    "questions_total": 4,
+    "dropped_unverified_quotes": 2,
+    "dropped_by_review": 1
+  },
+  "verdict": {
+    "development": "no",
+    "testing": "no",
+    "headline": "Начинать разработку нельзя: 1 критичный дефект (противоречивых — 1).",
+    "rationale": "Интерфейс части B не обеспечивает операции, которых требует часть A. Без ответа автора невозможно реализовать чтение порога.",
+    "fix_first": [
+      {
+        "finding_id": "S-001",
+        "title": "Операции API не совпадают с потребностями части A"
+      },
+      {
+        "finding_id": "D-001",
+        "title": "Нет измеримого порога времени передачи push"
+      }
+    ]
+  }
+}
