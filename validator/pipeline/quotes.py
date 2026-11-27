@@ -71,6 +71,7 @@ class QuoteIndex:
         # normalized start of each block
         self._nstarts = [bisect.bisect_left(self._map, s) for s in self._starts]
         self._block_norm = [normalize(b.text) for b in doc.blocks]
+        self._section = {b.id: b.section_id for b in doc.blocks}
 
     # ------------------------------------------------------------ helpers
 
@@ -125,11 +126,12 @@ class QuoteIndex:
         return self._find_one(fragments[0], prefer_blocks, fuzzy=fuzzy)
 
     def _find_one(self, quote: str, prefer: list[str] | None, *, fuzzy: bool) -> QuoteMatch | None:
-        nq = normalize(quote).strip(" .,;:")
+        # list and table markers the model copies from the rendered prompt are not document text
+        nq = normalize(quote).strip(" .,;:").lstrip("-•* ").strip()
         if not nq:
             return None
         rng = self._norm_range(prefer)
-        local = self._occurrences(nq, *rng) if rng else []
+        local = [h for h in (self._occurrences(nq, *rng) if rng else []) if self._one_section(h, len(nq))]
         if len(nq) < SHORT_QUOTE:
             hits = local if rng else self._occurrences(nq)
             if len(hits) != 1:
@@ -137,12 +139,17 @@ class QuoteIndex:
             return self._match(hits[0], len(nq), QuoteStatus.VERIFIED)
         if local:
             return self._match(local[0], len(nq), QuoteStatus.VERIFIED)
-        hits = self._occurrences(nq)
+        hits = [h for h in self._occurrences(nq) if self._one_section(h, len(nq))]
         if hits:
             return self._match(hits[0], len(nq), QuoteStatus.VERIFIED)
         if fuzzy:
             return self._fuzzy(nq, prefer)
         return None
+
+    def _one_section(self, nstart: int, length: int) -> bool:
+        """A quote never runs across a section heading into another section."""
+        ids = self._blocks_for_span(nstart, nstart + length)
+        return len({self._section[b] for b in ids}) <= 1
 
     def _match(self, nstart: int, length: int, status: QuoteStatus, score: float = 1.0) -> QuoteMatch:
         nend = nstart + length
@@ -179,15 +186,22 @@ class QuoteIndex:
             if idx:
                 candidates = list(range(max(idx[0] - 1, 0), min(idx[-1] + 2, len(self.block_ids))))
         best: tuple[float, int, int] | None = None
-        for pool in (candidates, range(len(self.block_ids))):
-            for bi in pool:
-                # a window over this block and the next one (quotes may span adjacent blocks)
-                start = self._nstarts[bi]
-                end_bi = min(bi + 2, len(self._nstarts))
-                end = self._nstarts[end_bi] if end_bi < len(self._nstarts) else len(self.norm)
-                hit = self._best_window(nq, start, end)
-                if hit and (best is None or hit[0] > best[0]):
-                    best = hit
+        n_blocks = len(self.block_ids)
+        for pool in (candidates, range(n_blocks)):
+            # a single block first; two adjacent blocks of the same section only if one is not enough
+            for span in (1, 2):
+                for bi in pool:
+                    if span == 2 and (bi + 1 >= n_blocks or
+                                      self._section[self.block_ids[bi]] != self._section[self.block_ids[bi + 1]]):
+                        continue
+                    start = self._nstarts[bi]
+                    end_bi = min(bi + span, len(self._nstarts))
+                    end = self._nstarts[end_bi] if end_bi < len(self._nstarts) else len(self.norm)
+                    hit = self._best_window(nq, start, end)
+                    if hit and (best is None or hit[0] > best[0]):
+                        best = hit
+                if best and best[0] >= FUZZY_THRESHOLD:
+                    break
             if best and best[0] >= FUZZY_THRESHOLD:
                 break
         if best is None or best[0] < FUZZY_THRESHOLD:

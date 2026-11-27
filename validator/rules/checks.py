@@ -529,11 +529,10 @@ def _check_empty_sections(doc: Document) -> tuple[list[RuleFinding], set[str]]:
                     f"Раздел «{sec_label}» не содержит заполненных требований или данных."
                 ),
                 recommendation=(
-                    "Заполнить раздел содержательными требованиями либо явно указать, "
-                    "что раздел не применим к данной задаче."
+                    "Заполнить раздел либо явно указать, что он не применим к данной задаче."
                 ),
                 clarifying_question=(
-                    f"Какие требования должны быть указаны в пустом разделе «{sec_label}» "
+                    f"Какие данные или отметки должны быть указаны в разделе «{sec_label}» "
                     "или этот раздел следует исключить?"
                 ),
             )
@@ -1132,6 +1131,12 @@ def _check_dangling_references(
     return findings
 
 
+_NORMATIVE_SECTION_RE = re.compile(
+    r"логик|правил|параметр|ответ|статус|интеграц|данн|logic|rule|parameter|response|status|integration|data",
+    re.IGNORECASE,
+)
+
+
 def _check_missing_req_ids(
     doc: Document,
     occurrences: list[_ReqIdOccurrence],
@@ -1155,8 +1160,9 @@ def _check_missing_req_ids(
             continue
 
         sec_heading = block.section_path[-1] if block.section_path else ""
+        # normative content also lives in interface logic, special rules and parameter tables
         in_req_section = bool(
-            REQUIREMENT_SECTION_HEADING_RE.search(sec_heading)
+            (REQUIREMENT_SECTION_HEADING_RE.search(sec_heading) or _NORMATIVE_SECTION_RE.search(sec_heading))
             and not _META_REVIEW_SECTION_RE.search(sec_heading)
         )
         has_normative_verb = bool(NORMATIVE_STATEMENT_RE.search(text))

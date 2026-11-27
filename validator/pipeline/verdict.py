@@ -22,7 +22,7 @@ from validator.models import (
 )
 from validator.pipeline.quotes import normalize
 
-MAX_QUESTIONS = 12
+MAX_QUESTIONS = 20
 CLASS_ORDER = [DefectClass.CONTRADICTORY, DefectClass.INCOMPLETE, DefectClass.UNVERIFIABLE,
                DefectClass.AMBIGUOUS, DefectClass.OTHER]
 CLASS_GENITIVE = {
@@ -55,16 +55,16 @@ def _same_topic(q: Question, f: AnyFinding, q_class: DefectClass) -> bool:
     text = f.clarifying_question.strip()
     if normalize(text) == normalize(q.text):
         return True
-    shared = set(q.requirement_ids) & set(f.requirement_ids)
-    if not shared:
-        return False
     from validator.pipeline.postprocess import stem_set
 
     wa, wb = stem_set(q.text), stem_set(text)
     if not (wa and wb):
         return False
     jaccard = len(wa & wb) / len(wa | wb)
-    return jaccard >= 0.5 or (jaccard >= 0.35 and q_class == f.defect_class)
+    if set(q.requirement_ids) & set(f.requirement_ids):
+        return jaccard >= 0.35
+    # the same person asked nearly the same thing about different places
+    return q.addressee is not None and q.addressee == f.addressee and jaccard >= 0.5
 
 
 def build_questions(findings: list[Finding], set_findings: list[SetFinding]) -> list[Question]:
@@ -94,7 +94,7 @@ def build_questions(findings: list[Finding], set_findings: list[SetFinding]) -> 
 
 def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],
                   questions: list[Question], *, dropped_unverified: int, dropped_by_review: int,
-                  merged: int = 0) -> Summary:
+                  merged: int = 0, candidates: dict[str, int] | None = None, dropped_unconfirmed: int = 0) -> Summary:
     every = _all(findings, set_findings)
     known = {r.id for r in reqs}
     # counted the same way the report shows them: own findings vs set-level findings only
@@ -112,7 +112,14 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
         requirements_with_findings=len(with_findings),
         requirements_in_set_findings_only=len(in_sets - with_findings),
         merged_duplicates=merged,
-        requirements_not_checked=sum(1 for r in reqs if r.check_status == "not_checked"),
+        requirements_clean=sum(1 for r in reqs if r.id not in with_findings and r.id not in in_sets
+                               and r.check_status == "checked"),
+        candidates_total=sum((candidates or {}).values()),
+        questions_in_findings=sum(1 for f in every if f.clarifying_question.strip()),
+        candidates_by_source=dict(candidates or {}),
+        dropped_unconfirmed=dropped_unconfirmed,
+        requirements_not_checked=sum(1 for r in reqs if r.check_status == "not_checked"
+                                     and r.id not in with_findings and r.id not in in_sets),
         findings_total=len(every),
         findings_by_severity={s.value: sum(1 for f in every if f.severity == s) for s in Severity},
         findings_by_criterion=dict(Counter(f.criterion.value for f in every)),
@@ -124,10 +131,10 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
     )
 
 
-def _short_title(f: AnyFinding, limit: int = 120) -> str:
-    from validator.pipeline.postprocess import short_text
+def _short_title(f: AnyFinding, limit: int = 400) -> str:
+    from validator.pipeline.postprocess import first_sentence
 
-    return short_text(f.explanation.split(". ")[0].strip().rstrip("."), limit)
+    return first_sentence(f.explanation, limit).rstrip(".")
 
 
 def build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],
@@ -171,10 +178,13 @@ def build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings
         f = by_id.get(fid)
         if f is not None and f not in order and f.severity != Severity.MINOR:
             order.append(f)
-    if not order:
-        ranked = sorted(critical or major, key=lambda f: (
-            CLASS_ORDER.index(f.defect_class), -len(f.requirement_ids), f.id))
-        order = ranked
+    # every critical defect comes before any major one; the critic's order is kept inside each level
+    default = sorted(critical, key=lambda f: (CLASS_ORDER.index(f.defect_class), -len(f.requirement_ids), f.id))
+    order += [f for f in default if f not in order]
+    if len(order) < 7:
+        order += [f for f in sorted(major, key=lambda f: (CLASS_ORDER.index(f.defect_class), f.id))
+                  if f not in order]
+    order.sort(key=lambda f: SEVERITY_RANK[f.severity])  # stable: keeps the critic's order within a level
     fix_first = [FixItem(finding_id=f.id, title=_short_title(f)) for f in order[:7]]
     return Verdict(development=development, testing=testing, headline=headline, rationale=rationale,
                    fix_first=fix_first)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from validator.models import (
@@ -134,7 +134,7 @@ def test_render_sample_report_snapshot_and_invariants():
 
     # Per-requirement check: full major, one-line minor, clean requirement, unchecked requirement.
     assert "### Требования без собственных нарушений" in md
-    assert "Нарушений по п. 5.2.5 ISO/IEC/IEEE 29148 не выявлено у" in md
+    assert "собственных нарушений по п. 5.2.5 нет" in md or "Без нарушений (ни собственных" in md
     assert "не проверено" in md
     assert "ISO/IEC/IEEE 29148:2018, п. 5.2.5 — проверяемость" in md
     assert "#### [Существенный] D-001" in md
@@ -221,7 +221,7 @@ def test_partial_report_banner_and_pipe_escaping():
 
 
 def test_empty_report_renders_cleanly():
-    now = datetime(2026, 11, 27, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
     empty = Report(
         run=RunInfo(
             document_title="Пустой документ",

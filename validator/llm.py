@@ -7,23 +7,43 @@ import json
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
 from validator.config import Settings
 
 ErrorKind = Literal[
-    "quota_daily", "rate_limit", "timeout", "server", "auth", "bad_request", "refusal", "deadline", "other"
+    "quota_daily", "rate_limit", "timeout", "server", "auth", "bad_request", "invalid_json", "network", "refusal",
+    "deadline", "skipped", "other"
 ]
 
-DAILY_QUOTA = ("PerDay", "per day", "GenerateRequestsPerDay", "daily", "quota exceeded for metric")
-RATE_LIMIT = ("429", "RESOURCE_EXHAUSTED", "rate_limit", "rate limit", "RateLimitError")
-SERVER = ("500", "502", "503", "504", "529", "UNAVAILABLE", "overloaded", "InternalServerError",
-          "ServiceUnavailable", "APIConnectionError", "Connection")
-TIMEOUT = ("timeout", "timed out", "DEADLINE_EXCEEDED", "Timeout")
-AUTH = ("401", "403", "AuthenticationError", "PermissionDenied", "API key not valid", "invalid x-api-key",
-        "API_KEY_INVALID", "UNAUTHENTICATED")
-BAD_REQUEST = ("400", "BadRequest", "INVALID_ARGUMENT", "invalid_request")
+# only an explicit per-day quota is daily; "quota exceeded for metric" is also sent for per-minute limits
+DAILY_QUOTA = ("perday", "per day", "per_day", "requests per day")
+RATE_LIMIT = ("resource_exhausted", "rate_limit", "rate limit", "ratelimiterror", "too many requests")
+SERVER = ("unavailable", "overloaded", "internalservererror", "serviceunavailable", "bad gateway")
+NETWORK = ("connecterror", "connectionerror", "apiconnectionerror", "getaddrinfo", "name or service not known",
+           "no connection could be made", "connection refused", "network is unreachable", "proxyerror",
+           "nodename nor servname", "temporary failure in name resolution", "connection reset")
+TIMEOUT = ("timeout", "timed out", "deadline_exceeded")
+AUTH = ("authenticationerror", "permissiondenied", "api key not valid", "invalid x-api-key", "api_key_invalid",
+        "unauthenticated")
+BAD_REQUEST = ("badrequest", "invalid_argument", "invalid_request", "failed_precondition", "not_found",
+               "notfounderror")
+NETWORK_RETRIES = 1  # a dead connection is not worth a long series of retries
+_SECRET = re.compile(r"(AIza[0-9A-Za-z_\-]{10,}|sk-[A-Za-z0-9_\-]{10,}|key=[^&\s]+|Bearer\s+\S+)")
+
+
+def _code(low: str, *codes: int) -> bool:
+    """Status codes matched as whole numbers, never as parts of other numbers."""
+    return any(re.search(rf"(?<![\d.]){c}(?![\d.])", low) for c in codes)
+
+
+def short_error(exc: BaseException, limit: int = 200) -> str:
+    """First line of the error, without keys or tokens: safe to show in a report."""
+    first = (str(exc).strip().splitlines() or [""])[0]
+    first = _SECRET.sub("***", first)
+    text = f"{type(exc).__name__}: {first}" if not isinstance(exc, LLMError) else first
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 MIN_ATTEMPT_SECONDS = 15.0  # do not start an attempt when less than this remains before the deadline
 MAX_RATE_LIMIT_SLEEP = 60.0
@@ -38,6 +58,19 @@ class LLMResponse:
     truncated: bool = False
     seconds: float = 0.0
     attempts: int = 1
+    notes: list[str] = field(default_factory=list)  # failed attempts and model switches, in Russian
+
+
+ATTEMPT_REASONS = {
+    "quota_daily": "дневная квота модели исчерпана",
+    "rate_limit": "лимит запросов в минуту",
+    "timeout": "нет ответа за отведённое время",
+    "server": "сервис модели перегружен или недоступен",
+    "bad_request": "API отклонило запрос",
+    "network": "нет связи с API",
+    "refusal": "модель отказалась отвечать",
+    "other": "ошибка вызова",
+}
 
 
 class LLMError(RuntimeError):
@@ -55,18 +88,25 @@ def classify_error(exc: BaseException) -> ErrorKind:
     msg = f"{type(exc).__name__}: {exc}"
     low = msg.lower()
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    if status in (401, 403) or any(m.lower() in low for m in AUTH[2:]):
+    if not isinstance(status, int):
+        status = None
+    if status in (401, 403) or any(m in low for m in AUTH) or (status is None and _code(low, 401) and
+                                                              "unauth" in low):
         return "auth"
-    if status == 429 or any(m.lower() in low for m in RATE_LIMIT):
-        return "quota_daily" if any(m.lower() in low for m in DAILY_QUOTA) else "rate_limit"
-    if any(m.lower() in low for m in TIMEOUT):
+    if any(m in low for m in NETWORK):
+        return "network"
+    if status == 429 or _code(low, 429) or any(m in low for m in RATE_LIMIT) or "exceeded your current quota" in low:
+        hint = retry_after_seconds(exc)
+        # a per-day quota id, or a wait far beyond a minute, will not recover within this run
+        if any(m in low for m in DAILY_QUOTA) or (hint is not None and hint > 300):
+            return "quota_daily"
+        return "rate_limit"
+    if any(m in low for m in TIMEOUT):
         return "timeout"
-    if isinstance(status, int) and status >= 500 or any(m.lower() in low for m in SERVER):
+    if (status is not None and status >= 500) or _code(low, 500, 502, 503, 504, 529) or any(m in low for m in SERVER):
         return "server"
-    if status == 400 or any(m.lower() in low for m in BAD_REQUEST):
+    if status in (400, 404, 422) or _code(low, 400, 404) or any(m in low for m in BAD_REQUEST):
         return "bad_request"
-    if status in (401, 403):
-        return "auth"
     return "other"
 
 
@@ -81,8 +121,14 @@ def retry_after_seconds(exc: BaseException) -> float | None:
                 return float(value)
         except (TypeError, ValueError):
             pass
-    m = re.search(r"retry(?:Delay)?['\"]?\s*(?:in|:)?\s*['\"]?(\d+(?:\.\d+)?)\s*s", str(exc), re.IGNORECASE)
-    return float(m.group(1)) if m else None
+    # "retry in 41.5s", "retry in 1h10m14.3s", "retryDelay": "41s"
+    m = re.search(r"retry(?:Delay)?['\"]?\s*(?:in|:)?\s*['\"]?((?:\d+h)?(?:\d+m(?!s))?(?:\d+(?:\.\d+)?s)?)",
+                  str(exc), re.IGNORECASE)
+    if not m or not m.group(1):
+        return None
+    parts = re.findall(r"(\d+(?:\.\d+)?)([hms])", m.group(1))
+    factor = {"h": 3600.0, "m": 60.0, "s": 1.0}
+    return sum(float(v) * factor[u] for v, u in parts) if parts else None
 
 
 class LLMClient:
@@ -95,6 +141,20 @@ class LLMClient:
         self.last_model: str | None = None  # only for generate()
         self._lock = threading.Lock()
         self._exhausted: set[str] = set()  # models that hit the daily quota in this process
+        self._local = threading.local()  # per-thread sink for attempt notes (progress output)
+
+    def set_note_sink(self, fn) -> None:
+        """Receive a short Russian note about every failed attempt or model switch in this thread."""
+        self._local.fn = fn
+
+    def _note(self, notes: list[str], text: str) -> None:
+        notes.append(text)
+        fn = getattr(self._local, "fn", None)
+        if fn is not None:
+            try:
+                fn(text)
+            except Exception:  # noqa: BLE001 - progress output must never break a call
+                notes.append("")
 
     @property
     def model(self) -> str:
@@ -123,10 +183,13 @@ class LLMClient:
         last_kind: ErrorKind = "other"
         attempts = 0
         started = time.monotonic()
-        for model in self._models():
+        notes: list[str] = []
+        for index, model in enumerate(self._models()):
+            if index > 0:
+                self._note(notes, f"переход на запасную модель {model}")
             timeouts = 0
             for attempt in range(s.max_retries + 1):
-                timeout = s.timeout_seconds
+                timeout = s.attempt_timeout
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
                     if remaining < MIN_ATTEMPT_SECONDS:
@@ -140,13 +203,23 @@ class LLMClient:
                     )
                     resp.attempts = attempts
                     resp.seconds = time.monotonic() - started
+                    resp.notes = [n for n in notes if n]
                     return resp
                 except Exception as exc:
                     kind = classify_error(exc)
                     last_kind = kind
-                    errors.append(f"{model}: {type(exc).__name__}: {str(exc)[:200]}")
+                    errors.append(f"{model}: {short_error(exc)}")
+                    spent = time.monotonic() - started
+                    self._note(notes, f"{model}: {ATTEMPT_REASONS.get(kind, ATTEMPT_REASONS['other'])} "
+                                      f"(попытка {attempt + 1}, {spent:.0f} с от начала вызова)")
                     if kind == "auth":
                         raise LLMError("ключ отклонён провайдером: проверьте ключ в .env", "auth") from exc
+                    if kind == "network":
+                        if attempt < NETWORK_RETRIES:
+                            time.sleep(2.0)
+                            continue
+                        # another model will not fix a dead connection
+                        raise LLMError("нет связи с API модели: " + short_error(exc), "network") from exc
                     if kind == "quota_daily":
                         with self._lock:
                             self._exhausted.add(model)
@@ -164,6 +237,7 @@ class LLMClient:
                     if kind == "rate_limit":
                         hint = retry_after_seconds(exc)
                         pause = min(hint if hint is not None else pause, MAX_RATE_LIMIT_SLEEP)
+                        self._note(notes, f"{model}: пауза {pause:.0f} с по требованию сервера")
                     if deadline is not None and time.monotonic() + pause + MIN_ATTEMPT_SECONDS > deadline:
                         raise LLMError("предел времени прогона исчерпан", "deadline") from exc
                     time.sleep(pause)
@@ -202,7 +276,7 @@ class GeminiClient(LLMClient):
         from google.genai import types
 
         self._client = genai.Client(
-            api_key=settings.api_key, http_options=types.HttpOptions(timeout=int(settings.timeout_seconds * 1000))
+            api_key=settings.api_key, http_options=types.HttpOptions(timeout=int(settings.attempt_timeout * 1000))
         )
         self._no_thinking: set[str] = set()
 
@@ -218,9 +292,10 @@ class GeminiClient(LLMClient):
             extra = {}
             if with_thinking and level:
                 extra["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+            if temperature is not None:
+                extra["temperature"] = temperature
             return types.GenerateContentConfig(
                 system_instruction=system,
-                temperature=0.1 if temperature is None else temperature,
                 max_output_tokens=max_output_tokens,
                 response_mime_type="application/json" if schema else None,
                 response_json_schema=schema,

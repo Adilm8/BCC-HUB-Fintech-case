@@ -42,6 +42,12 @@ from validator.report.labels import (
 )
 
 
+def _first_sentence(text: str) -> str:
+    from validator.pipeline.postprocess import first_sentence
+
+    return first_sentence(text, 600)
+
+
 def _short(text: str, limit: int = 120) -> str:
     """Cut at a word boundary and mark the cut with an ellipsis."""
     t = " ".join((text or "").split())
@@ -65,6 +71,12 @@ def _set_refs(report: Report) -> dict[str, list[str]]:
             if sf.id not in refs[rid]:
                 refs[rid].append(sf.id)
     return refs
+
+
+def _count(n: int) -> str:
+    """'1 требования', '3 требований' after the preposition «у»; plain genitive forms."""
+    word = "требования" if n % 10 == 1 and n % 100 != 11 else "требований"
+    return f"{n} {word}"
 
 
 def _escape_cell(value: str) -> str:
@@ -191,7 +203,8 @@ def _render_passport(report: Report) -> list[str]:
             )
         by_key = {s.key: s for s in run.stages}
         check, set_check = by_key.get("check"), by_key.get("set_check")
-        if check and set_check and check.llm_calls and set_check.llm_calls:
+        sequential = run.provider == "gemini" or run.profile == "economy"  # one call at a time
+        if check and set_check and check.llm_calls and set_check.llm_calls and not sequential:
             lines.extend([
                 "",
                 (
@@ -222,7 +235,8 @@ def _render_short_summary(report: Report) -> list[str]:
         (
             f"- **Требований выделено:** {summary.requirements_total} "
             f"(с собственными нарушениями — {summary.requirements_with_findings}, "
-            f"затронуты только находками набора — {summary.requirements_in_set_findings_only}, "
+            f"затронуты находками проверки набора — {summary.requirements_in_set_findings_only}, "
+            f"без нарушений — {summary.requirements_clean}, "
             f"не проверено — {summary.requirements_not_checked})."
         ),
         (
@@ -272,6 +286,15 @@ def _render_slicing(report: Report) -> list[str]:
             )
 
     lines.append("")
+    s = report.summary
+    if s.blocks_total:
+        lines.append(
+            f"Блоки документа: всего {s.blocks_total} = в требованиях {s.blocks_in_requirements} "
+            f"+ служебные {s.blocks_skipped} + заголовки разделов и таблиц {s.blocks_structural} "
+            f"+ прочие {s.blocks_other} (короткие фрагменты и примеры, не образующие отдельных требований). "
+            "Одно требование может состоять из нескольких блоков."
+        )
+        lines.append("")
     skipped_total = len(report.skipped_blocks)
     if skipped_total == 0:
         lines.append("Служебных и пропущенных блоков: 0.")
@@ -325,6 +348,10 @@ def _render_full_finding(finding: BaseFinding, heading_title: str) -> list[str]:
     lines.extend(_render_evidence_lines(finding.evidence))
     lines.append(f"- **Объяснение:** {finding.explanation}")
     lines.append(f"- **Рекомендация:** {finding.recommendation}")
+    if finding.related_notes:
+        lines.append("- **Связанные замечания** (объединены с этой находкой):")
+        for note in finding.related_notes:
+            lines.append(f"  - {note}")
     lines.append(f"- **Уточняющий вопрос** ({addressee_label(finding.addressee)}): {finding.clarifying_question}")
     if finding.answer_options:
         lines.append("- **Варианты ответа:**")
@@ -417,20 +444,24 @@ def _render_per_requirement(report: Report) -> list[str]:
         lines.append("")
 
     if clean:
-        lines.append("### Требования без собственных нарушений")
-        lines.append("")
-        lines.append(
-            f"Нарушений по п. 5.2.5 ISO/IEC/IEEE 29148 не выявлено у {len(clean)} "
-            f"{'требования' if len(clean) % 10 == 1 and len(clean) % 100 != 11 else 'требований'}: "
-            + ", ".join(r.id for r in clean) + "."
-        )
         touched = [r for r in clean if set_refs.get(r.id)]
+        untouched = [r for r in clean if not set_refs.get(r.id)]
+        lines.append("### Требования без собственных нарушений по п. 5.2.5")
+        lines.append("")
         if touched:
-            lines.append("")
-            lines.append("Из них затронуты находками проверки набора:")
+            lines.append(
+                f"У {_count(len(touched))} собственных нарушений по п. 5.2.5 нет, но они затронуты находками "
+                "проверки набора (см. раздел «Проверка набора требований»):"
+            )
             lines.append("")
             for r in touched:
-                lines.append(f"- {r.id} ({_escape_cell(_short(r.title, 80))}) — {', '.join(set_refs[r.id])}")
+                lines.append(f"- {r.id} ({_escape_cell(_short(r.title, 80))}) — см. {', '.join(set_refs[r.id])}")
+            lines.append("")
+        if untouched:
+            lines.append(
+                f"Без нарушений (ни собственных, ни в проверке набора): {_count(len(untouched))} — "
+                + ", ".join(r.id for r in untouched) + "."
+            )
         lines.append("")
 
     if orphan_findings:
@@ -457,11 +488,16 @@ def _bucket_set_findings(
     acceptance: list[SetFinding] = []
     completeness: list[SetFinding] = []
 
+    gaps = (SetCheck.EMPTY_SECTION, SetCheck.MISSING_REQUIREMENT, SetCheck.MISSING_SCENARIO)
     for sf in set_findings:
-        if sf.cross_part or sf.set_check == SetCheck.CROSS_PART:
-            cross_part.append(sf)
-        elif sf.set_check in (SetCheck.ACCEPTANCE_MISMATCH, SetCheck.ACCEPTANCE_GAP):
+        # the kind of defect decides the chapter; "several parts are quoted" only matters for consistency issues
+        if sf.set_check in (SetCheck.ACCEPTANCE_MISMATCH, SetCheck.ACCEPTANCE_GAP):
             acceptance.append(sf)
+        elif sf.set_check in gaps or sf.criterion in (Criterion.SET_COMPLETE, Criterion.RANKED,
+                                                       Criterion.MODIFIABLE, Criterion.TRACEABLE):
+            completeness.append(sf)
+        elif sf.set_check == SetCheck.CROSS_PART or (sf.cross_part and sf.criterion == Criterion.SET_CONSISTENT):
+            cross_part.append(sf)
         elif (
             sf.set_check in (SetCheck.CONTRADICTION, SetCheck.TERMINOLOGY, SetCheck.DUPLICATION)
             or sf.criterion == Criterion.SET_CONSISTENT
@@ -569,6 +605,7 @@ def _render_summary(report: Report) -> list[str]:
         f"| Всего требований | {summary.requirements_total} |",
         f"| Требований с собственными нарушениями | {summary.requirements_with_findings} |",
         f"| Требований, затронутых только находками набора | {summary.requirements_in_set_findings_only} |",
+        f"| Требований без нарушений | {summary.requirements_clean} |",
         f"| Непроверенных требований | {summary.requirements_not_checked} |",
         f"| Всего нарушений | {summary.findings_total} |",
         f"| Вопросов к автору ТЗ | {summary.questions_total} |",
@@ -649,7 +686,7 @@ def _render_summary(report: Report) -> list[str]:
                 finding = finding_by_id.get(fid)
                 if finding is not None:
                     lines.append(
-                        f"  - **{fid}** ({finding.section}) — {_short(_inline_text(finding.explanation), 220)}"
+                        f"  - **{fid}** ({finding.section}) — {_first_sentence(_inline_text(finding.explanation))}"
                     )
                 else:
                     lines.append(f"  - **{fid}**")
@@ -668,7 +705,8 @@ def _render_summary(report: Report) -> list[str]:
 def _render_question_block(question: Question) -> list[str]:
     place_parts: list[str] = []
     if question.requirement_ids:
-        place_parts.append(f"требования {', '.join(question.requirement_ids)}")
+        word = "требование" if len(question.requirement_ids) == 1 else "требования"
+        place_parts.append(f"{word} {', '.join(question.requirement_ids)}")
     if question.section:
         place_parts.append(f"раздел «{question.section}»")
     place = "; ".join(place_parts) if place_parts else "—"
@@ -697,6 +735,13 @@ def _render_questions(report: Report) -> list[str]:
 
     blocking = [q for q in report.questions if q.blocking]
     regular = [q for q in report.questions if not q.blocking]
+    in_cards = report.summary.questions_in_findings
+    if in_cards > len(report.questions):
+        lines.append(
+            f"Здесь собраны {len(report.questions)} главных вопросов: блокирующие первыми, близкие по теме "
+            f"объединены. Всего в карточках нарушений {in_cards} уточняющих вопросов."
+        )
+        lines.append("")
 
     if blocking:
         lines.append("### Блокирующие вопросы")
@@ -742,6 +787,33 @@ def _render_verdict(report: Report) -> list[str]:
     return lines
 
 
+_SOURCE_LABELS = {
+    "rules": "правила",
+    "check": "проверка каждого требования",
+    "set": "проверка набора",
+    "derived": "сводные находки по матрице покрытия",
+    "review": "добавлено критиком",
+}
+
+
+def _candidate_balance(report: Report) -> list[str]:
+    """Candidates in = findings out + merged + removed: the numbers in the report add up."""
+    s = report.summary
+    if not s.candidates_total:
+        return []
+    parts = ", ".join(f"{_SOURCE_LABELS.get(k, k)} — {v}" for k, v in s.candidates_by_source.items() if v)
+    return [
+        f"- Не подтверждено критиком (цитата только по тексту требования): {s.dropped_unconfirmed}",
+        "",
+        (
+            f"Баланс кандидатов: всего {s.candidates_total} ({parts}) = итоговые нарушения {s.findings_total} "
+            f"+ объединённые дубли {s.merged_duplicates} + удалённые критиком {s.dropped_by_review} "
+            f"+ неподтверждённые {s.dropped_unconfirmed}. Находки без подтверждённой цитаты "
+            f"({s.dropped_unverified_quotes}) отброшены до попадания в кандидаты."
+        ),
+    ]
+
+
 def _render_appendix(report: Report) -> list[str]:
     standards = report.run.standards
     standards_list = ", ".join(standards) if standards else "ISO/IEC/IEEE 29148:2018, IEEE 830-1998"
@@ -783,17 +855,18 @@ def _render_appendix(report: Report) -> list[str]:
                 "дословный фрагмент документа). Находки без подтверждённой цитаты отбрасываются."
             ),
             "",
-            f"- Подтверждено дословно (`verified`): {quote_counts.get(QuoteStatus.VERIFIED, 0)}",
-            f"- Уточнено по тексту документа (`repaired`): {quote_counts.get(QuoteStatus.REPAIRED, 0)}",
-            f"- Привязано к тексту требования (`anchored`): {quote_counts.get(QuoteStatus.ANCHORED, 0)}",
+            "Цитаты в итоговых нарушениях (у одного нарушения может быть несколько цитат):",
+            "",
+            f"- Цитаты, совпавшие с текстом дословно (`verified`): {quote_counts.get(QuoteStatus.VERIFIED, 0)}",
+            f"- Цитаты, исправленные по тексту документа (`repaired`): {quote_counts.get(QuoteStatus.REPAIRED, 0)}",
+            f"- Цитаты, заменённые текстом требования (`anchored`): {quote_counts.get(QuoteStatus.ANCHORED, 0)}",
+            "",
+            "Находки (кандидаты в нарушения):",
+            "",
             f"- Отброшено находок без подтверждённой цитаты: {report.summary.dropped_unverified_quotes}",
             f"- Отброшено на этапе критического пересмотра: {report.summary.dropped_by_review}",
             f"- Объединено с другими находками как дубли: {report.summary.merged_duplicates}",
-            "",
-            (
-                "Число кандидатов в статусе этапов складывается так: итоговые нарушения + удалённые критиком "
-                "+ объединённые дубли + отброшенные без цитаты."
-            ),
+            *_candidate_balance(report),
             "",
             "### Ограничения",
             "",

@@ -74,7 +74,7 @@ def test_invalid_twice_raises_bad_request():
     fake = FakeLLM({"check": "мусор"})
     with pytest.raises(LLMError) as err:
         call_structured(fake, LLMCheck, "p", system=None, budget=Budget(5), cache=StageCache(None))
-    assert err.value.kind == "bad_request"
+    assert err.value.kind == "invalid_json"
 
 
 def test_budget_is_enforced():

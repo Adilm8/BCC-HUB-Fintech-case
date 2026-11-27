@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import threading
 import time
@@ -16,6 +17,7 @@ from validator.llm import LLMClient, LLMError, make_client
 from validator.models import (
     STAGE_TITLES,
     STANDARDS,
+    BlockKind,
     CoverageRow,
     Criterion,
     Document,
@@ -46,19 +48,40 @@ from validator.pipeline.structured import Budget, BudgetExceeded, StageCache, St
 from validator.pipeline.verdict import build_questions, build_summary, build_verdict
 
 LLM_STAGES = (StageKey.EXTRACT, StageKey.CHECK, StageKey.SET_CHECK, StageKey.REVIEW)
-FATAL_KINDS = {"quota_daily", "deadline", "auth"}
+FATAL_KINDS = {"quota_daily", "deadline", "auth", "network"}
 TOPUP_LIMIT = 40
+LONG_DOC_DETAIL = "документ слишком длинный для одного вызова: нарезка правилами"
 
 REASONS = {
     "quota_daily": "исчерпана дневная квота модели",
     "rate_limit": "превышен лимит запросов в минуту",
     "timeout": "модель не ответила вовремя",
     "server": "сервис модели недоступен",
-    "bad_request": "модель вернула ответ, который не удалось разобрать",
+    "bad_request": "API модели отклонило запрос",
+    "invalid_json": "модель вернула ответ, который не удалось разобрать",
+    "network": "нет связи с API модели (проверьте интернет или прокси)",
     "refusal": "модель отказалась отвечать",
     "deadline": "исчерпан предел времени прогона",
+    "skipped": "пропущено из-за нехватки времени",
     "other": "ошибка вызова модели",
 }
+
+
+def describe_error(exc: BaseException) -> str:
+    """Generic reason plus the provider's own short message (no keys), and a hint where one helps."""
+    from validator.llm import short_error
+
+    kind = getattr(exc, "kind", "other")
+    reason = REASONS.get(kind, REASONS["other"])
+    if isinstance(exc, BudgetExceeded):
+        return "исчерпан бюджет вызовов модели"
+    detail = short_error(exc, 160)
+    low = detail.lower()
+    if kind == "bad_request" and ("not_found" in low or "not found" in low or re.search(r"(?<!\d)404(?!\d)", low)):
+        reason += " (проверьте имя модели: GEMINI_MODEL или ANTHROPIC_MODEL в .env)"
+    if "location is not supported" in low:
+        reason += " (провайдер недоступен из этого региона)"
+    return f"{reason}: {detail}" if detail and detail not in reason else reason
 
 
 def agent_version() -> str:
@@ -107,6 +130,29 @@ class _Run:
         self.warnings: list[str] = []
         self._t0: dict[StageKey, float] = {}
         self._hits: dict[StageKey, list[bool]] = {}
+        self.notes: dict[StageKey, list[str]] = {}
+
+    def note(self, stage: str, text: str) -> None:
+        """A failed attempt or a model switch: shown as progress and kept for the run warnings."""
+        try:
+            key = StageKey(stage)
+        except ValueError:
+            return
+        with self.lock:
+            bucket = self.notes.setdefault(key, [])
+            if text not in bucket:
+                bucket.append(text)
+        if self.on_event is not None:
+            try:
+                self.on_event(StageEvent(stage=key, state=StageState.RUNNING, message=text))
+            except Exception:  # noqa: BLE001 - a broken listener must not break the run
+                return
+
+    def note_warnings(self) -> None:
+        for key, notes in self.notes.items():
+            if notes:
+                shown = "; ".join(notes[:4]) + (f" и ещё {len(notes) - 4}" if len(notes) > 4 else "")
+                self.warnings.append(f"{STAGE_TITLES[key]}: {shown}.")
 
     def emit(self, key: StageKey, state: StageState, message: str = "", done: int | None = None,
              total: int | None = None) -> None:
@@ -148,10 +194,7 @@ class _Run:
         return StageState.CACHED if hits and all(hits) else StageState.DONE
 
     def fail(self, key: StageKey, exc: BaseException) -> str:
-        kind = getattr(exc, "kind", "other")
-        reason = REASONS.get(kind, REASONS["other"])
-        if isinstance(exc, BudgetExceeded):
-            reason = "исчерпан бюджет вызовов модели"
+        reason = describe_error(exc)
         self.account(key, None, getattr(exc, "responses", None))
         self.emit(key, StageState.FAILED, reason)
         return reason
@@ -196,8 +239,12 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     client = client or make_client(settings)
     budget = Budget(profile.max_calls)
     cache = StageCache(Path(settings.cache_dir) if settings.cache_enabled else None)
-    deadline = time.monotonic() + settings.run_deadline_seconds
-    ctx = StageContext(client=client, settings=settings, budget=budget, cache=cache, deadline=deadline)
+    run_started = time.monotonic()
+    deadline = run_started + settings.run_deadline
+    review_reserve = 0.15 * settings.run_deadline if profile.review else 0.0
+    ctx = StageContext(client=client, settings=settings, budget=budget, cache=cache, deadline=deadline,
+                       review_reserve=review_reserve, note=run.note)
+    durations: list[float] = []  # seconds of finished model calls in this run
     index = QuoteIndex(doc)
     stats = pp.Stats()
     fatal: str | None = None
@@ -207,23 +254,34 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         kind = getattr(exc, "kind", "other")
         if kind == "auth":
             raise exc
+        if kind == "deadline" and time.monotonic() < deadline - 15:
+            return  # only the time before the critic's reserve ran out: the critic still gets its slot
         if kind in FATAL_KINDS or isinstance(exc, BudgetExceeded):
             fatal = fatal or REASONS.get(kind, REASONS["other"])
 
     # ---------------------------------------------------------- extract
     extraction: LLMExtraction | None = None
     run.emit(StageKey.EXTRACT, StageState.RUNNING)
-    try:
-        res = run_extract(ctx, doc)
-        run.account(StageKey.EXTRACT, res)
-        extraction = res.data
-        stats.dropped_schema_items += res.dropped_items
-        if res.truncated:
-            run.warnings.append("Ответ нарезчика обрезан: часть блоков отнесена к требованиям правилами.")
-    except LLMError as exc:
-        fatal_from(exc)
-        reason = run.fail(StageKey.EXTRACT, exc)
-        run.warnings.append(f"Нарезка выполнена правилами: {reason}.")
+    if doc.char_count > settings.max_context_chars:
+        # one call cannot hold the whole document: cut by rules, check batch by batch with their own blocks
+        run.emit(StageKey.EXTRACT, StageState.SKIPPED, LONG_DOC_DETAIL)
+        run.warnings.append(
+            f"Документ длиннее {settings.max_context_chars} символов: нарезка выполнена правилами по блокам, "
+            "проверка идёт батчами без полного текста документа.")
+    else:
+        try:
+            t_extract = time.monotonic()
+            res = run_extract(ctx, doc)
+            durations.append(time.monotonic() - t_extract)
+            run.account(StageKey.EXTRACT, res)
+            extraction = res.data
+            stats.dropped_schema_items += res.dropped_items
+            if res.truncated:
+                run.warnings.append("Ответ нарезчика обрезан: часть блоков отнесена к требованиям правилами.")
+        except LLMError as exc:
+            fatal_from(exc)
+            reason = run.fail(StageKey.EXTRACT, exc)
+            run.warnings.append(f"Нарезка выполнена правилами: {reason}.")
     ext = pp.build_requirements(doc, extraction, index)
     reqs = ext.requirements
     if extraction is not None:
@@ -234,6 +292,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     builder = pp.CandidateBuilder(doc, reqs, index, stats)
     candidates: list[pp.Candidate] = builder.from_rules(pre.findings)
+    counts: dict[str, int] = {"rules": len(candidates)}
     coverage: list[CoverageRow] = []
     checked: set[str] = set()
     check_ok = False
@@ -247,17 +306,38 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     else:
         run.emit(StageKey.CHECK, StageState.RUNNING, total=len(batches), done=0)
         run.emit(StageKey.SET_CHECK, StageState.RUNNING)
-        tasks: list[tuple[str, Callable[[], StructuredResult]]] = []
-        for i, b in enumerate(batches):
-            tasks.append((f"check:{i}", lambda b=b: run_check_batch(ctx, doc, b, reqs, pre.hints)))
+        def typical_call() -> float:
+            done = sorted(durations)
+            return max(45.0, 1.2 * done[len(done) // 2]) if done else 90.0
+
+        def timed(fn: Callable[[], StructuredResult], *, optional: bool) -> Callable[[], StructuredResult]:
+            def task() -> StructuredResult:
+                left = deadline - review_reserve - time.monotonic()
+                need = typical_call()
+                if optional and left < need:
+                    raise LLMError(f"пропущено: осталось {max(left, 0):.0f} с, обычный вызов занимает около "
+                                   f"{need:.0f} с", "skipped")
+                t0 = time.monotonic()
+                res = fn()
+                durations.append(time.monotonic() - t0)
+                return res
+            return task
+
+        check_tasks = [(f"check:{i}", timed(lambda b=b: run_check_batch(ctx, doc, b, reqs, pre.hints), optional=True))
+                       for i, b in enumerate(batches)]
         if profile.merge_set_checks:
-            tasks.append(("set:merged", lambda: run_merged(ctx, doc, reqs, pre.inventory, ext.skipped)))
+            set_tasks = [("set:merged", timed(lambda: run_merged(ctx, doc, reqs, pre.inventory, ext.skipped),
+                                              optional=False))]
         else:
-            tasks.append(("set:s1", lambda: run_s1(ctx, doc, reqs, pre.inventory)))
-            tasks.append(("set:s2", lambda: run_s2(ctx, doc, reqs, ext.skipped)))
+            set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory), optional=False)),
+                         ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped), optional=False))]
+        workers = 1 if getattr(client, "provider", "") == "gemini" else max(1, profile.parallel)
+        # one call at a time: the set checks find the critical contradictions, so they go first and the
+        # per-requirement batches are the ones dropped when time runs out
+        tasks = set_tasks + check_tasks if workers == 1 else check_tasks + set_tasks
         results: dict[str, StructuredResult | BaseException] = {}
         done_batches = 0
-        with ThreadPoolExecutor(max_workers=max(1, profile.parallel)) as pool:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             futures: dict[str, Future] = {name: pool.submit(fn) for name, fn in tasks}
             for name, fut in futures.items():
                 try:
@@ -295,7 +375,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         # one top-up call for requirements the model skipped or could not reach
         to_retry = missing + [x for b in failed_batches for x in b]
         reserve = 1 if profile.review else 0
-        if to_retry and not fatal and budget.remaining > reserve:
+        enough_time = deadline - review_reserve - time.monotonic() > typical_call()
+        if to_retry and not fatal and budget.remaining > reserve and enough_time:
             topup = to_retry[:TOPUP_LIMIT]
             try:
                 r = run_check_batch(ctx, doc, topup, reqs, pre.hints)
@@ -312,12 +393,13 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             n_check = sum(1 for c in candidates if c.source == FindingSource.LLM)
             detail = (f"батчей: {len(batches)}, проверено требований: {len(checked)} из {len(reqs)}, "
                       f"кандидатов: {n_check}")
+            counts["check"] = n_check
             run.emit(StageKey.CHECK, run.finished_state(StageKey.CHECK), detail)
             if not_checked:
                 run.warnings.append(f"Не проверено требований: {len(not_checked)} "
                                     f"({', '.join(x.id for x in not_checked[:15])}).")
         else:
-            reason = REASONS.get(getattr(failures[0], "kind", "other"), REASONS["other"]) if failures else \
+            reason = describe_error(failures[0]) if failures else \
                 "модель не вернула результатов"
             run.emit(StageKey.CHECK, StageState.FAILED, reason)
             run.warnings.append(f"Проверка требований не выполнена: {reason}.")
@@ -337,27 +419,35 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             run.account(StageKey.SET_CHECK, r)
             stats.dropped_schema_items += r.dropped_items
             sdata: LLMSetCheck = r.data
-            candidates.extend(builder.from_set(sdata.findings))
+            set_cands = builder.from_set(sdata.findings)
+            counts["set"] = counts.get("set", 0) + len(set_cands)
+            candidates.extend(set_cands)
             if name != "set:s1":
                 coverage.extend(_coverage(builder, sdata, reqs))
         set_ok = len(set_failures) < len(set_names)
         if not set_failures:
-            run.emit(StageKey.SET_CHECK, run.finished_state(StageKey.SET_CHECK), f"вызовов: {len(set_names)}")
+            run.emit(StageKey.SET_CHECK, run.finished_state(StageKey.SET_CHECK),
+                     f"вызовов: {len(set_names)}, кандидатов: {counts.get('set', 0)}")
         else:
-            reason = REASONS.get(getattr(set_failures[0][1], "kind", "other"), REASONS["other"])
+            reason = describe_error(set_failures[0][1])
             lens = ", ".join("S1" if n == "set:s1" else "S2" if n == "set:s2" else "S1+S2" for n, _ in set_failures)
             run.emit(StageKey.SET_CHECK, StageState.FAILED if not set_ok else StageState.DONE,
                      f"не выполнено ({lens}): {reason}")
             run.warnings.append(f"Проверка набора выполнена не полностью ({lens}): {reason}.")
 
+    derived: list[pp.Candidate] = []
     if not check_ok and pre.hints:
-        candidates.extend(_hints_as_findings(builder, pre))
-
-    candidates.extend(_aggregate_gaps(builder, coverage, candidates))
+        derived.extend(_hints_as_findings(builder, pre))
+    derived.extend(_aggregate_gaps(builder, coverage, candidates))
+    counts["derived"] = len(derived)
+    candidates.extend(derived)
+    _soften_test_section_gaps(candidates, reqs)
     pp.clean_texts(candidates, builder)
     parts = {b.id: b.part for b in doc.blocks}
     pp.apply_guards(candidates, parts)
     candidates = pp.dedup(candidates, stats)
+    _soften_test_section_gaps(candidates, reqs)  # a merge may have brought back a higher severity
+    stats.merged_before_review = stats.merged
     pp.assign_candidate_ids(candidates)
 
     # ---------------------------------------------------------- review
@@ -378,17 +468,21 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             review: LLMReview = r.data
             before = len(candidates)
             candidates, outcome = pp.apply_review(candidates, review, builder, stats)
+            counts["review"] = len(outcome.missed)
             reviewed = True
             pp.clean_texts(candidates, builder)
             pp.apply_guards(candidates, parts)  # the critic may not lift capped criteria
+            _soften_test_section_gaps(candidates, reqs)
             if outcome.missed:
                 pp.clean_texts(outcome.missed, builder)
                 pp.apply_guards(outcome.missed, parts)
                 candidates = pp.dedup(candidates + outcome.missed, stats)
             fix_order = outcome.fix_first
             rationale = outcome.rationale
+            entered = sum(counts.get(k, 0) for k in ("rules", "check", "set", "derived"))
             run.emit(StageKey.REVIEW, run.finished_state(StageKey.REVIEW),
-                     f"было {before}, осталось {len(candidates)}, добавлено критиком: {len(outcome.missed)}")
+                     f"на пересмотр: {before} из {entered} кандидатов, осталось: {len(candidates)} "
+                     "(подробный баланс — в приложении)")
         except LLMError as exc:
             if exc.kind == "auth":
                 raise
@@ -405,11 +499,22 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     questions = build_questions(findings, set_findings)
     summary = build_summary(reqs, findings, set_findings, questions, merged=stats.merged,
                             dropped_unverified=stats.dropped_unverified_quotes,
-                            dropped_by_review=stats.dropped_by_review)
+                            dropped_by_review=stats.dropped_by_review, candidates=counts,
+                            dropped_unconfirmed=stats.dropped_unconfirmed)
     verdict = build_verdict(reqs, findings, set_findings, coverage, critic_order=critic_order, rationale=rationale)
+    in_reqs = {b for r in reqs for b in r.block_ids}
+    skipped_ids = {s.block_id for s in ext.skipped} - in_reqs
+    structural = {b.id for b in doc.blocks if b.kind in (BlockKind.HEADING, BlockKind.TABLE_HEADER)}
+    structural -= in_reqs | skipped_ids
+    summary = summary.model_copy(update={
+        "blocks_total": len(doc.blocks), "blocks_in_requirements": len(in_reqs), "blocks_skipped": len(skipped_ids),
+        "blocks_structural": len(structural),
+        "blocks_other": len(doc.blocks) - len(in_reqs) - len(skipped_ids) - len(structural),
+    })
     run.emit(StageKey.ASSEMBLE, StageState.DONE,
              f"нарушений: {len(findings) + len(set_findings)}, вопросов: {len(questions)}")
 
+    run.note_warnings()
     status = _status(run, profile.review)
     if status != RunStatus.COMPLETE:
         run.warnings.insert(0, "Отчёт неполный: часть этапов модели не выполнена. Повторите запуск позже, "
@@ -431,6 +536,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 def _status(run: _Run, review_in_profile: bool) -> RunStatus:
     ok = {StageState.DONE, StageState.CACHED}
     st = {k: run.stages[k].state for k in LLM_STAGES}
+    if st[StageKey.EXTRACT] == StageState.SKIPPED and run.stages[StageKey.EXTRACT].detail == LONG_DOC_DETAIL:
+        st[StageKey.EXTRACT] = StageState.DONE  # skipped by design for long documents
     if st[StageKey.EXTRACT] not in ok and st[StageKey.CHECK] not in ok:
         return RunStatus.RULES_ONLY
     needed = [StageKey.EXTRACT, StageKey.CHECK, StageKey.SET_CHECK]
@@ -489,6 +596,21 @@ def _aggregate_gaps(builder: pp.CandidateBuilder, coverage: list[CoverageRow],
         requirement_ids=rest, source=FindingSource.RULE, set_check=SetCheck.ACCEPTANCE_GAP, confirmed=True,
         no_merge=True, addressee="qa",
     )]
+
+
+def _soften_test_section_gaps(candidates: list[pp.Candidate], reqs: list[Requirement]) -> None:
+    """An empty testing section is not blocking when the document has filled acceptance criteria."""
+    has_acceptance = any(r.kind == ReqKind.ACCEPTANCE_CRITERION for r in reqs)
+    for c in candidates:
+        if c.set_check not in (SetCheck.EMPTY_SECTION, None) and c.source != FindingSource.RULE:
+            continue
+        where = " ".join([*(e.section for e in c.evidence), *(e.quote for e in c.evidence), c.explanation])
+        if not re.search(r"тестир", where, re.IGNORECASE):
+            continue
+        if c.set_check == SetCheck.EMPTY_SECTION or c.source == FindingSource.RULE:
+            c.addressee = "qa"
+        if has_acceptance and c.severity == Severity.CRITICAL:
+            c.severity = Severity.MAJOR  # still protected: the critic cannot lower it further
 
 
 def _hints_as_findings(builder: pp.CandidateBuilder, pre: PrecheckResult) -> list[pp.Candidate]:

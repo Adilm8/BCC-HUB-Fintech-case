@@ -152,5 +152,5 @@ def parse_structure(raw: RawDocument) -> Document:
         if b.part and b.part not in parts:
             parts.append(b.part)
     return Document(path=raw.path, name=raw.name, title=raw.title, format=raw.format,
-                    sha256=hashlib.sha256(raw.text.encode("utf-8")).hexdigest(), char_count=len(raw.text),
+                    sha256=raw.sha256 or hashlib.sha256(raw.text.encode("utf-8")).hexdigest(), char_count=len(raw.text),
                     text=raw.text, sections=sections, blocks=blocks, parts=parts, warnings=list(raw.warnings))

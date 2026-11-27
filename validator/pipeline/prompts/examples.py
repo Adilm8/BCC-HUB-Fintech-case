@@ -39,7 +39,7 @@ set_check acceptance_mismatch, criterion set_consistent, severity critical, дв
 Пример расхождения частей (заявки на отпуск). Часть «Функции» требует, чтобы руководитель видел остаток дней \
 сотрудника; спецификация интерфейса описывает только метод создания заявки, метода чтения остатка нет. \
 scenario: «Руководитель открывает заявку: функция требует показать остаток, а интерфейс не даёт способа его \
-получить». set_check cross_part, criterion set_consistent, severity critical.
+получить». set_check missing_requirement, criterion set_complete, severity critical: это пробел интерфейса, а не противоречие.
 
 Без сценария нет находки о противоречии.
 </examples>"""

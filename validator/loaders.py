@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import hashlib
 import logging
 import math
 import re
@@ -106,6 +107,7 @@ def load_document(path: Path) -> RawDocument:
         format=fmt,
         text=text,
         warnings=warnings,
+        sha256=hashlib.sha256(file_path.read_bytes()).hexdigest(),
     )
 
 

@@ -28,12 +28,16 @@ def provider_schema(model: type[BaseModel]) -> dict:
     raw = model.model_json_schema()
     defs = raw.pop("$defs", {})
 
-    def walk(node: Any) -> Any:
+    def walk(node: Any, properties: bool = False) -> Any:
         if isinstance(node, dict):
+            if properties:
+                # keys here are field names (a field may well be called "title"), not schema keywords
+                return {k: walk(v) for k, v in node.items()}
             if "$ref" in node:
                 name = node["$ref"].rsplit("/", 1)[-1]
                 return walk(copy.deepcopy(defs[name]))
-            out = {k: walk(v) for k, v in node.items() if k not in ("title", "default", "description")}
+            out = {k: walk(v, properties=k == "properties") for k, v in node.items()
+                   if k not in ("title", "default", "description")}
             if out.get("type") == "object" and "properties" in out:
                 out["additionalProperties"] = False
                 out["required"] = list(out["properties"].keys())
@@ -256,6 +260,10 @@ class StructuredResult:
     def model(self) -> str | None:
         return self.responses[-1].model if self.responses else None
 
+    @property
+    def notes(self) -> list[str]:
+        return [] if self.cached else [n for r in self.responses for n in getattr(r, "notes", [])]
+
 
 def call_structured(
     client: LLMClient,
@@ -314,6 +322,6 @@ def call_structured(
                 )
                 continue
             break
-    err = LLMError(f"невалидный JSON от модели: {last_error}", "bad_request")
+    err = LLMError(f"невалидный JSON от модели: {last_error}", "invalid_json")
     err.responses = responses  # type: ignore[attr-defined]
     raise err

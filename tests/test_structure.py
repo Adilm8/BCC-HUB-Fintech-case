@@ -26,7 +26,7 @@ def test_parse_requirements_md_structure():
     doc = parse_structure(raw)
 
     assert isinstance(doc, Document)
-    assert doc.sha256 == hashlib.sha256(raw.text.encode("utf-8")).hexdigest()
+    assert doc.sha256 == raw.sha256 == hashlib.sha256(Path(raw.path).read_bytes()).hexdigest()
     assert doc.char_count == len(raw.text)
     assert doc.parts == ["Часть A. Новый функционал", "Часть B. REST API"]
     assert len(doc.sections) == 34

@@ -44,10 +44,58 @@ GENERIC_PATTERNS = [
     r"^неясно\.?$",
 ]
 _ROW_SKIP_KINDS = {BlockKind.HEADING, BlockKind.TABLE_HEADER}
+# deterministic facts about the document: the critic may lower them but not delete them as "generic"
+FACT_RULES = {"missing_req_ids", "no_ranking", "duplicate_id", "numbering_gap", "dangling_reference"}
 _BLOCK_ID = re.compile(r"\bB\d{3,4}\b")
 _CAND_ID = re.compile(r"\b(?:см\.?\s+)?C\d{2,3}\b", re.IGNORECASE)
 _DUPLICATE_NOTE = re.compile(r"(дублир\w*|уже уч[её]т\w*|не добавля\w*)", re.IGNORECASE)
 _HTTP_CODE = re.compile(r"\b[1-5]\d\d\b")
+_OPEN_QUESTION = re.compile(r"^(как|какой|какая|какое|какие|каким|какую|каких|что|чем|когда|где|кто|сколько|"
+                            r"почему|зачем|в каких|в каком|на каком|по какой|по каким|откуда|куда)\b",
+                            re.IGNORECASE)
+_YES_NO = re.compile(r"^(да|нет)\b", re.IGNORECASE)
+_META_KEYS = re.compile(
+    r"^(наименование|название|продукт|автор|author|developer|разработчик|владелец|owner|business owner|"
+    r"product owner|аналитик|задача|jira|тип работы|влияние на|версия|дата|статус документа|gitlab|"
+    r"repository|репозиторий|framework|фреймворк|проект|подразделение|фио|подпись|согласован)(?!\w)", re.IGNORECASE)
+
+
+_ABBREVIATIONS = {"п", "пп", "ст", "рис", "см", "т.е", "т.д", "т.п", "др", "г", "гг", "напр", "т", "ч", "стр", "e.g",
+                  "i.e", "vs", "no"}
+
+
+def first_sentence(text: str, limit: int = 220) -> str:
+    """First sentence; never splits inside quotes, after a single letter («Часть A.») or inside numbers."""
+    t = " ".join((text or "").split())
+    depth = 0
+    ascii_open = False
+    for i, ch in enumerate(t):
+        if ch in "«“„":
+            depth += 1
+        elif ch in "»”":
+            depth = max(0, depth - 1)
+        elif ch == '"':
+            ascii_open = not ascii_open
+        elif ch in ".!?" and depth == 0 and not ascii_open:
+            if i + 1 < len(t) and t[i + 1] != " ":
+                continue
+            start = t.rfind(" ", 0, i) + 1
+            token = t[start:i].strip("(«\"").lower()
+            if len(token) <= 1 or token in _ABBREVIATIONS or re.fullmatch(r"[\d.,]+", token):
+                continue
+            nxt = t[i + 2: i + 3]
+            if nxt and not (nxt.isupper() or nxt.isdigit() or nxt in "«\"("):
+                continue
+            return short_text(t[: i + 1], limit)
+    return short_text(t, limit)
+
+
+def _sentence(text: str) -> str:
+    s = first_sentence(text).strip()
+    if not s:
+        return s
+    s = s[0].upper() + s[1:]
+    return s if s.endswith((".", "!", "?", "…")) else s + "."
 
 
 def short_text(text: str, limit: int = 120) -> str:
@@ -98,7 +146,8 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
             if not bids:
                 continue
             bids.sort(key=index.block_order)
-            text = " ".join(blocks[b].text for b in bids)
+            sep = "; " if all(blocks[b].kind == BlockKind.TABLE_ROW for b in bids) else " "
+            text = sep.join(blocks[b].text for b in bids)
             quote = text
             if item.quote.strip():
                 m = index.find(item.quote, bids)
@@ -109,11 +158,27 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
             raw.append((index.block_order(bids[0]), Requirement(
                 id="", doc_id=doc_id, id_assigned=doc_id is None, kind=ReqKind(item.kind),
                 part=first.part, section=section_label(first.section_path, doc.title), block_ids=bids,
-                title=short_text(item.title.strip() or text), quote=quote, source="llm",
+                title=short_text(item.title.strip() or quote), quote=quote, source="llm",
             )))
             used.update(bids)
             # requirements whose blocks were also marked skipped stay requirements
             skipped = [s for s in skipped if s.block_id not in bids]
+    # document-info rows and the preamble are service text, whatever the model said about them
+    meta_ids = {b.id for b in doc.blocks if _is_meta_block(b, doc.parts)}
+    if meta_ids:
+        kept_raw = []
+        for pos, r in raw:
+            if set(r.block_ids) <= meta_ids:
+                for bid in r.block_ids:
+                    if all(s.block_id != bid for s in skipped):
+                        skipped.append(SkippedBlock(block_id=bid, reason="meta", text=blocks[bid].text[:300]))
+                continue
+            kept_raw.append((pos, r))
+        raw = kept_raw
+        used.update(meta_ids)
+        for bid in meta_ids:
+            if all(s.block_id != bid for s in skipped):
+                skipped.append(SkippedBlock(block_id=bid, reason="meta", text=blocks[bid].text[:300]))
     added = 0
     for b in doc.blocks:
         if b.id in used or b.kind in _ROW_SKIP_KINDS or len(b.text) < 20:
@@ -126,12 +191,62 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
             source="rule",
         )))
         added += 1
+    raw = _code_blocks_to_own_section(raw, blocks, index, doc)
     raw.sort(key=lambda t: t[0])
+    # two different requirements never share a title: fall back to each one's own quote
+    seen_titles: dict[str, int] = {}
+    for _, r in raw:
+        seen_titles[normalize(r.title)] = seen_titles.get(normalize(r.title), 0) + 1
+    for i, (pos, r) in enumerate(raw):
+        if seen_titles[normalize(r.title)] > 1 and normalize(r.quote) != normalize(r.title):
+            raw[i] = (pos, r.model_copy(update={"title": short_text(r.quote)}))
     reqs = []
     for i, (_, r) in enumerate(raw, 1):
         reqs.append(r.model_copy(update={"id": f"R-{i:03d}"}))
     skipped.sort(key=lambda s: index.block_order(s.block_id))
     return Extracted(reqs, skipped, added)
+
+
+_NORMATIVE = re.compile(r"(должн|обязан|\bshall\b|\bmust\b)", re.IGNORECASE)
+
+
+def _is_meta_block(b, parts: list[str] | None = None) -> bool:
+    """A key-value row of document attributes, or a preamble paragraph before the first part."""
+    if b.kind == BlockKind.TABLE_ROW and b.cells and len(b.cells) == 2 and _META_KEYS.match(b.cells[0].strip()):
+        return True
+    outside_parts = not b.part or (parts is not None and parts and b.part not in parts)
+    return (b.kind == BlockKind.PARAGRAPH and outside_parts and len(b.section_path) <= 1
+            and not _NORMATIVE.search(b.text))
+
+
+def _code_blocks_to_own_section(raw, blocks, index, doc):
+    """An example (code block) belongs to the heading it sits under, not to a requirement of another section."""
+    moved: list[tuple[str, str]] = []  # (block id, section id)
+    out = []
+    for pos, r in raw:
+        home = blocks[r.block_ids[0]].section_id
+        keep = [b for b in r.block_ids if not (blocks[b].kind == BlockKind.CODE and blocks[b].section_id != home)]
+        gone = [b for b in r.block_ids if b not in keep]
+        if gone and keep:
+            moved += [(b, blocks[b].section_id) for b in gone]
+            text = " ".join(blocks[b].text for b in keep)
+            quote = r.quote if normalize(r.quote) in normalize(text) else text
+            r = r.model_copy(update={"block_ids": keep, "quote": quote})
+        out.append((pos, r))
+    for bid, sec in moved:
+        host = next((i for i, (_, r) in enumerate(out) if blocks[r.block_ids[0]].section_id == sec), None)
+        if host is not None:
+            pos, r = out[host]
+            ids = sorted([*r.block_ids, bid], key=index.block_order)
+            out[host] = (pos, r.model_copy(update={"block_ids": ids, "quote": " ".join(blocks[b].text for b in ids)}))
+        else:
+            b = blocks[bid]
+            out.append((index.block_order(bid), Requirement(
+                id="", doc_id=None, id_assigned=True, kind=ReqKind.INTERFACE, part=b.part,
+                section=section_label(b.section_path, doc.title), block_ids=[bid],
+                title=short_text(f"Пример: {b.section_path[-1] if b.section_path else b.text}"), quote=b.text,
+                source="llm")))
+    return out
 
 
 def _doc_id(candidate: str, blocks) -> str | None:
@@ -172,7 +287,9 @@ class Candidate:
     addressee: str = ""
     protected: bool = False  # severity fixed by a deterministic rule: the critic may not lower or drop it
     no_merge: bool = False  # aggregated findings keep their own requirement list
-    gist_added: int = 0
+    keep: bool = False  # a deterministic fact (missing ids, ranking): the critic may not drop it as generic
+    rule: str = ""
+    related: list[str] = field(default_factory=list)
 
     @property
     def is_set(self) -> bool:
@@ -197,6 +314,8 @@ class Stats:
     dropped_by_review: int = 0
     dropped_schema_items: int = 0
     merged: int = 0
+    merged_before_review: int = 0
+    dropped_unconfirmed: int = 0
 
 
 class CandidateBuilder:
@@ -236,7 +355,8 @@ class CandidateBuilder:
         m = self.index.find(quote, prefer)
         if m is None:
             return None
-        if rid is None:
+        # the requirement is the one that owns the matched text, not the one the model named
+        if rid is None or not set(m.block_ids) & set(self.reqs[rid].block_ids):
             rid = next((self._block_req[b] for b in m.block_ids if b in self._block_req), None)
         return Evidence(quote=m.text, section=self.section_of(m.block_ids), requirement_id=rid,
                         block_ids=m.block_ids, quote_status=m.status)
@@ -260,6 +380,8 @@ class CandidateBuilder:
 
         out = _BLOCK_ID.sub(repl, text or "")
         out = _CAND_ID.sub("", out)
+        if self.doc.title:
+            out = out.replace(f"«{self.doc.title} › ", "«").replace(f"{self.doc.title} › ", "")
         out = re.sub(r"\(\s*[,;]?\s*\)", "", out)
         out = re.sub(r"\s{2,}", " ", out)
         return out.replace(" ,", ",").replace(" .", ".").strip()
@@ -406,7 +528,7 @@ class CandidateBuilder:
                 check = SetCheck.OTHER
             out.append(Candidate(f.criterion, f.severity, [m_ev], f.explanation, f.recommendation,
                                  self._question(f.clarifying_question), [], rids, FindingSource.RULE,
-                                 set_check=check,
+                                 set_check=check, rule=f.rule, keep=f.rule in FACT_RULES,
                                  protected=f.severity == Severity.CRITICAL))
         return out
 
@@ -437,16 +559,38 @@ def _status_code_conflict(c: Candidate, parts: dict[str, str]) -> bool:
     if c.set_check not in CONTRADICTION_CHECKS:
         return False
     verified = [e for e in c.evidence if e.quote_status != QuoteStatus.ANCHORED]
-    coded = [frozenset(_HTTP_CODE.findall(e.quote)) for e in verified]
-    coded = [s for s in coded if s]
-    if len(coded) < 2 or len(set(coded)) < 2:
+
+    def codes(e: Evidence) -> frozenset[str]:
+        # an example body carries no code itself: the code is in the heading it sits under
+        found = _HTTP_CODE.findall(e.quote)
+        if not found and e.section:
+            found = _HTTP_CODE.findall(e.section.split(SEP)[-1])
+        return frozenset(found)
+
+    # each place must prescribe exactly one code; quotes listing many codes are about schemas, not a conflict
+    coded = [codes(e) for e in verified]
+    single = [s for s in coded if len(s) == 1]
+    if len(single) < 2 or len(set(single)) < 2:
         return False
     owners = {parts.get(b, "") for e in verified for b in e.block_ids}
     return len(owners) == 1
 
 
+def _exclusive_places(c: Candidate) -> bool:
+    """A contradiction needs at least two verified quotes from different blocks."""
+    verified = [e for e in c.evidence if e.quote_status != QuoteStatus.ANCHORED]
+    seen: list[set[str]] = []
+    for e in verified:
+        blocks = set(e.block_ids)
+        if blocks and all(not (blocks & s) for s in seen):
+            seen.append(blocks)
+    return len(seen) >= 2
+
+
 def apply_guards(cands: list[Candidate], parts: dict[str, str] | None = None) -> None:
     for c in cands:
+        if c.set_check in CONTRADICTION_CHECKS and c.source != FindingSource.RULE and not _exclusive_places(c):
+            c.set_check = SetCheck.OTHER  # one place cannot contradict itself: a gap or an ambiguity
         if c.criterion in MINOR_ONLY:
             c.severity = Severity.MINOR
         anchored = all(e.quote_status == QuoteStatus.ANCHORED for e in c.evidence)
@@ -467,7 +611,8 @@ def _same_place(a: Candidate, b: Candidate) -> bool:
         for eb in b.evidence:
             if set(ea.block_ids) & set(eb.block_ids) and quotes_overlap(ea.quote, eb.quote):
                 if a.is_set and b.is_set and a.set_check != b.set_check and not (
-                        a.set_check in CONTRADICTION_CHECKS and b.set_check in CONTRADICTION_CHECKS):
+                        a.set_check in CONTRADICTION_CHECKS and b.set_check in CONTRADICTION_CHECKS) and not (
+                        SetCheck.OTHER in (a.set_check, b.set_check)):
                     continue
                 return True
     return False
@@ -491,6 +636,46 @@ def stem_set(text: str) -> set[str]:
     return {w[:5] for w in word_set(text) if len(w) > 3}
 
 
+_GAP_CHECKS = {SetCheck.EMPTY_SECTION, SetCheck.MISSING_REQUIREMENT}
+
+
+def _rule_twin(a: Candidate, b: Candidate) -> bool:
+    """A rule finding and a model finding about the same placeholder or empty block."""
+    if (a.source == FindingSource.RULE) == (b.source == FindingSource.RULE):
+        return False
+    rule, other = (a, b) if a.source == FindingSource.RULE else (b, a)
+    if rule.set_check not in _GAP_CHECKS or rule.no_merge or not other.is_set:
+        return False
+    return bool(rule.block_ids & other.block_ids) and other.criterion in (
+        Criterion.SET_COMPLETE, Criterion.COMPLETE, Criterion.SET_VALIDATABLE)
+
+
+_OWN_GAP_CRITERIA = {Criterion.COMPLETE, Criterion.UNAMBIGUOUS, Criterion.VERIFIABLE}
+
+
+def _keeps_own_gap(a: Candidate, b: Candidate) -> bool:
+    """A requirement's own gap (an unhandled branch, an undefined term) is not absorbed by a set contradiction."""
+    for x, y in ((a, b), (b, a)):
+        if not x.is_set and x.criterion in _OWN_GAP_CRITERIA and y.is_set and y.set_check in CONTRADICTION_CHECKS:
+            return True
+    return False
+
+
+def _loosely_related(a: Candidate, b: Candidate) -> bool:
+    """The critic called them duplicates: refuse only when they share almost no content words."""
+    wa, wb = stem_set(a.explanation), stem_set(b.explanation)
+    if not wa or not wb:
+        return True
+    return len(wa & wb) / min(len(wa), len(wb)) >= 0.2
+
+
+def _same_quotes(a: Candidate, b: Candidate) -> bool:
+    """Two findings built on exactly the same set of quotes (two or more) are one finding."""
+    qa = {normalize(e.quote) for e in a.evidence}
+    qb = {normalize(e.quote) for e in b.evidence}
+    return len(qa) >= 2 and qa == qb
+
+
 def _set_overlap(a: Candidate, b: Candidate) -> bool:
     """Two set findings quoting mostly the same blocks describe one defect."""
     if not (a.is_set and b.is_set) or a.no_merge or b.no_merge:
@@ -502,31 +687,33 @@ def _set_overlap(a: Candidate, b: Candidate) -> bool:
     return len(inter) >= 2 and len(inter) / small >= 0.5
 
 
-def _first_sentence(text: str, limit: int = 220) -> str:
-    s = re.split(r"(?<=[.!?])\s+", (text or "").strip(), maxsplit=1)[0]
-    return short_text(s, limit)
 
 
 def merge_into(winner: Candidate, loser: Candidate) -> None:
     if SEVERITY_RANK[loser.severity] < SEVERITY_RANK[winner.severity]:
         winner.severity = loser.severity
-    # keep the gist of a merged finding that says something different
-    wa, wb = word_set(winner.explanation), word_set(loser.explanation)
-    if wb and winner.gist_added < 2 and len(wa & wb) / len(wb) < 0.5 and not _DUPLICATE_NOTE.search(
+    # keep the gist of a merged finding that says something different, as a separate related note
+    wa, wb = stem_set(winner.explanation), stem_set(loser.explanation)
+    if wb and len(winner.related) < 3 and len(wa & wb) / len(wb) < 0.5 and not _DUPLICATE_NOTE.search(
             loser.explanation):
-        gist = _first_sentence(loser.explanation)
-        if gist and normalize(gist) not in normalize(winner.explanation):
-            winner.explanation = winner.explanation.rstrip() + " Также: " + gist
-            winner.gist_added += 1
+        gist = _sentence(loser.explanation)
+        known = [winner.explanation, *winner.related]
+        if len(gist) > 25 and all(not quotes_overlap(gist, k, 0.5) for k in known):
+            winner.related.append(gist)
+    for note in loser.related:
+        if len(winner.related) < 3 and note not in winner.related:
+            winner.related.append(note)
     winner.protected = winner.protected or loser.protected
     if not winner.addressee:
         winner.addressee = loser.addressee
     for e in loser.evidence:
         if not any(normalize(e.quote) == normalize(x.quote) for x in winner.evidence):
             winner.evidence.append(e)
-    for r in loser.requirement_ids:
-        if r not in winner.requirement_ids:
-            winner.requirement_ids.append(r)
+    # an empty section belongs to no requirement: do not import foreign requirement ids into it
+    if not (winner.set_check == SetCheck.EMPTY_SECTION and winner.source == FindingSource.RULE):
+        for r in loser.requirement_ids:
+            if r not in winner.requirement_ids:
+                winner.requirement_ids.append(r)
     if not winner.question and loser.question:
         winner.question = loser.question
         winner.options = loser.options
@@ -545,7 +732,9 @@ def dedup(cands: list[Candidate], stats: Stats) -> list[Candidate]:
     kept: list[Candidate] = []
     for c in ordered:
         target = next((k for k in kept if not (k.no_merge or c.no_merge) and (
-            (_same_place(k, c) and _related_explanations(k, c)) or (_set_overlap(k, c) and _related_explanations(k, c))
+            _same_quotes(k, c) or (not _keeps_own_gap(k, c) and (
+                (_same_place(k, c) and _related_explanations(k, c))
+                or (_set_overlap(k, c) and _related_explanations(k, c)) or _rule_twin(k, c)))
         )), None)
         if target is None:
             kept.append(c)
@@ -614,6 +803,13 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                 # a proven contradiction is merged only with a finding about the same place
                 c.confirmed = True
                 continue
+            if c.no_merge or target.no_merge:
+                c.confirmed = True  # aggregated findings keep their own requirement list
+                continue
+            if (c.criterion != target.criterion and not _loosely_related(target, c)) or _keeps_own_gap(c, target):
+                # different criteria and different content, or a requirement's own gap: two defects
+                c.confirmed = True
+                continue
             if c.is_set and not target.is_set:
                 # keep the set-level finding: fold the requirement finding into it
                 merge_into(c, target)
@@ -633,7 +829,7 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                     c.confirmed = True  # unproven drop: the finding stays
                     c.review_note = "критик предложил удалить без подтверждающей цитаты; находка оставлена"
             elif d.drop_reason in ("generic", "out_of_scope"):
-                if c.two_quote_contradiction:
+                if c.two_quote_contradiction or c.keep:
                     c.confirmed = True
                     continue
                 anchored = all(e.quote_status == QuoteStatus.ANCHORED for e in c.evidence)
@@ -649,6 +845,9 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                 c.confirmed = True
         if d.improved_question.strip() and c.cid not in dropped:
             c.question = CandidateBuilder._question(d.improved_question)
+            # yes/no options do not fit a rewritten open question
+            if _OPEN_QUESTION.match(c.question) and any(_YES_NO.match(o) for o in c.options):
+                c.options = []
     kept = [c for c in cands if c.cid not in dropped]
     # the critic adds only critical defects, never notes about duplicates
     missed = [m for m in builder.from_set(review.missed[:5], FindingSource.REVIEW)
@@ -665,7 +864,7 @@ def drop_unconfirmed_anchored(cands: list[Candidate], reviewed: bool, stats: Sta
     out = []
     for c in cands:
         if c.needs_confirmation and reviewed and not c.confirmed:
-            stats.dropped_unverified_quotes += 1
+            stats.dropped_unconfirmed += 1
             continue
         out.append(c)
     return out
@@ -679,10 +878,46 @@ ADDRESSEES = {"business", "analyst", "architect", "security", "qa"}
 _SECURITY_WORDS = re.compile(r"(безопасн|персональн|маскир|токен|утечк|журнал\w* .*карт|ИБ\b|шифров)", re.IGNORECASE)
 
 
+RULE_OPTIONS: dict[str, list[str]] = {
+    "placeholder": ["Значение будет указано в документе до начала разработки",
+                    "Параметр не применим: отметить «не применимо» с причиной"],
+    "empty_cell": ["Ячейки будут заполнены в документе", "Строка лишняя и будет удалена"],
+    "empty_section": ["Раздел будет заполнен до передачи в разработку",
+                      "Раздел не применим к задаче: исключить его с пояснением"],
+    "unfilled_template_table": ["Автор заполнит чек-лист до передачи в разработку",
+                                "Чек-лист не используется для этой задачи: удалить его из документа"],
+    "missing_req_ids": ["Ввести сквозную нумерацию всех требований",
+                        "Нумеровать только функциональные требования и критерии приёмки"],
+    "no_ranking": ["Указать приоритет каждого требования (обязательно / желательно)",
+                   "Все требования обязательны: зафиксировать это одной фразой"],
+    "duplicate_id": ["Перенумеровать повторяющиеся идентификаторы", "Это одно требование: объединить записи"],
+    "numbering_gap": ["Пропуск намеренный: требование удалено", "Требование потеряно: восстановить его"],
+    "dangling_reference": ["Добавить недостающий раздел или требование", "Исправить ссылку на существующий пункт"],
+}
+GENERIC_OPTIONS = ["Уточнить формулировку в документе до начала разработки",
+                   "Оставить как есть и зафиксировать допущение команды"]
+
+
+def rule_options(c: Candidate) -> list[str]:
+    if c.rule in RULE_OPTIONS:
+        return list(RULE_OPTIONS[c.rule])
+    if c.set_check == SetCheck.EMPTY_SECTION:
+        return list(RULE_OPTIONS["empty_section"])
+    return []
+
+
 def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
     if c.addressee in ADDRESSEES:
         return c.addressee
     text = f"{c.explanation} {c.question}"
+    if c.source == FindingSource.RULE:
+        where = " ".join([text, *(e.section for e in c.evidence), *(e.quote for e in c.evidence)])
+        if re.search(r"тестир|приёмк|приемк", where, re.IGNORECASE):
+            return "qa"
+        if re.search(r"\burl\b|swagger|endpoint|адрес|контур", where, re.IGNORECASE):
+            return "architect"
+        # templates, checklists, approvals, versions, numbering and priorities belong to the document's owner
+        return "business"
     if _SECURITY_WORDS.search(text):
         return "security"
     if c.set_check in (SetCheck.ACCEPTANCE_GAP, SetCheck.ACCEPTANCE_MISMATCH, SetCheck.MISSING_SCENARIO):
@@ -732,8 +967,15 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
     req_map = {r.id: r for r in reqs}
     for c in cands:
         c.evidence = compact_evidence(c.evidence)
+        if c.set_check == SetCheck.EMPTY_SECTION and c.source == FindingSource.RULE:
+            c.requirement_ids = []
+            c.evidence = [e.model_copy(update={"requirement_id": None}) for e in c.evidence]
         c.addressee = infer_addressee(c, req_map)
         c.options = distinct_options(c.options)
+        if not c.options and c.source == FindingSource.RULE:
+            c.options = rule_options(c)
+        if not c.options and c.severity == Severity.CRITICAL:
+            c.options = list(GENERIC_OPTIONS)  # a blocking question always offers a way to answer
 
     def req_pos(c: Candidate) -> int:
         return min((order.get(r, 10**6) for r in c.requirement_ids), default=10**6)
@@ -751,7 +993,7 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             id=c.final_id, criterion=c.criterion, severity=c.severity, defect_class=defect_class_for(c.criterion),
             evidence=c.evidence, explanation=c.explanation, recommendation=c.recommendation,
             clarifying_question=c.question, answer_options=c.options, source=c.source, review_note=c.review_note,
-            requirement_ids=c.requirement_ids, addressee=c.addressee,
+            requirement_ids=c.requirement_ids, addressee=c.addressee, related_notes=c.related,
         ))
     for i, c in enumerate(sets, 1):
         c.final_id = f"S-{i:03d}"
@@ -763,6 +1005,7 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             recommendation=c.recommendation, clarifying_question=c.question, answer_options=c.options,
             source=c.source, review_note=c.review_note, set_check=check, requirement_ids=c.requirement_ids,
             cross_part=check == SetCheck.CROSS_PART or len(parts) > 1, addressee=c.addressee,
+            related_notes=c.related,
         ))
     return findings, set_findings
 

@@ -154,6 +154,8 @@ _INCOMPLETE_CHECKS = {SetCheck.MISSING_REQUIREMENT, SetCheck.MISSING_SCENARIO, S
 def defect_class_for(criterion: Criterion | str, set_check: SetCheck | str | None = None) -> DefectClass:
     """Map a criterion (and optional set check) to the organisers' defect classes."""
     c = Criterion(criterion)
+    if c == Criterion.SET_COMPLETE:
+        return DefectClass.INCOMPLETE  # something is missing, whatever check found it
     if set_check is not None:
         sc = SetCheck(set_check)
         if sc in _CONTRADICTORY_CHECKS:
@@ -184,6 +186,7 @@ class RawDocument(BaseModel):
     format: Literal["md", "txt", "pdf", "docx"]
     text: str
     warnings: list[str] = Field(default_factory=list)
+    sha256: str | None = None  # of the original file bytes; None for text passed in directly
 
 
 class Section(BaseModel):
@@ -262,6 +265,7 @@ class BaseFinding(BaseModel):
     source: FindingSource
     review_note: str | None = None
     addressee: Addressee | None = None
+    related_notes: list[str] = Field(default_factory=list)  # gist of findings merged into this one
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -326,6 +330,16 @@ class Summary(BaseModel):
     dropped_by_review: int
     requirements_in_set_findings_only: int = 0  # touched only by set-level findings
     merged_duplicates: int = 0  # candidates merged into other findings
+    requirements_clean: int = 0  # checked, no own findings, not touched by set findings
+    candidates_total: int = 0  # every candidate that entered deduplication and review
+    candidates_by_source: dict[str, int] = Field(default_factory=dict)
+    dropped_unconfirmed: int = 0  # anchored candidates the critic did not confirm
+    blocks_total: int = 0
+    blocks_in_requirements: int = 0
+    blocks_skipped: int = 0  # service, template and empty blocks
+    blocks_structural: int = 0  # headings and table headers
+    blocks_other: int = 0  # short fragments and code examples not assigned to a requirement
+    questions_in_findings: int = 0  # clarifying questions printed in finding cards
 
 
 class FixItem(BaseModel):

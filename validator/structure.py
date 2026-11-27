@@ -369,7 +369,7 @@ def parse_structure(raw: RawDocument) -> Document:
         name=raw.name,
         title=raw.title,
         format=raw.format,
-        sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        sha256=raw.sha256 or hashlib.sha256(text.encode("utf-8")).hexdigest(),
         char_count=len(text),
         text=text,
         sections=sections,
