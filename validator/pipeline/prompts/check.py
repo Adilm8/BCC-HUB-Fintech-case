@@ -40,8 +40,24 @@ TASK = """Задание: проверь КАЖДОЕ требование из 
 - Цитату бери из текста самого требования (или из блока, где виден дефект)."""
 
 
+COMPLETENESS_ITEMS = """  Р — расчёты и условия: определён ли каждый термин, от которого они зависят (что именно считается, \
+какие операции учитываются, валюта и комиссии);
+  Н — нефункциональное требование: точки начала и конца измерения, перцентиль, нагрузка и условия измерения;
+  Ув — исходящие уведомления и сообщения: задано ли содержание и какие данные оно раскрывает получателю."""
+
+GLOSSARY_NOTE = """- В <terms> — термины и величины, от которых зависят условия и расчёты требований (в скобках — где они \
+используются). Для каждого проверь, определён ли он где-то в документе: что именно он означает, что \
+учитывается, в каких единицах. Определение есть — находки нет. Определения нет, и без него условие можно \
+понять по-разному, — находка unambiguous по требованию, где термин используется, с цитатой этого места."""
+
+REMARKS_NOTE = """- remarks — короткие замечания в сомнительных случаях: возможный пробел или неоднозначность, которые \
+не тянут на полноценную находку. Одна строка в text и дословная цитата из требования. Не больше двух на \
+требование; не повторяй в remarks то, что уже оформлено находкой; нет сомнений — пустой список."""
+
+
 def build_check_prompt(doc: Document, batch: list[Requirement], all_reqs: list[Requirement],
-                       hints: list[Hint], *, include_document: bool = True) -> str:
+                       hints: list[Hint], *, include_document: bool = True, remarks: bool = False,
+                       completeness_items: bool = False, domain: str = "", terms: str = "") -> str:
     by_block: dict[str, list[Hint]] = defaultdict(list)
     for h in hints:
         by_block[h.block_id].append(h)
@@ -59,6 +75,17 @@ def build_check_prompt(doc: Document, batch: list[Requirement], all_reqs: list[R
     parts.append("<requirements>\n" + requirement_table(batch) + "\n</requirements>")
     if hint_lines:
         parts.append("<hints>\n" + "\n".join(hint_lines[:120]) + "\n</hints>")
+    if domain:
+        parts.append(domain)
+    if terms:
+        parts.append("<terms>\n" + terms + "\n</terms>")
     parts.append(CHECK_EXAMPLES)
-    parts.append(TASK)
+    task = TASK
+    if completeness_items:
+        task = task.replace("\n  Пример: «", "\n" + COMPLETENESS_ITEMS + "\n  Пример: «", 1)
+    if terms:
+        task += "\n" + GLOSSARY_NOTE
+    if remarks:
+        task += "\n" + REMARKS_NOTE
+    parts.append(task)
     return "\n\n".join(parts)

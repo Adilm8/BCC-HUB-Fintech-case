@@ -571,7 +571,8 @@ def _render_per_requirement(report: Report) -> list[str]:
             )
 
         major_or_crit = [f for f in req_findings if f.severity in (Severity.CRITICAL, Severity.MAJOR)]
-        minors = [f for f in req_findings if f.severity == Severity.MINOR]
+        minors = [f for f in req_findings if f.severity == Severity.MINOR and not f.remark]
+        remarks = [f for f in req_findings if f.remark]
 
         for f in major_or_crit:
             lines.append("")
@@ -581,6 +582,12 @@ def _render_per_requirement(report: Report) -> list[str]:
             lines.append("")
             for f in minors:
                 lines.append(_render_minor_finding_line(f))
+
+        if remarks:
+            lines.append("")
+            lines.append("**Замечания (возможные пробелы):**")
+            for f in remarks:
+                lines.append(f"- {f.id}: «{_inline_text(f.quote)}» — {_inline_text(f.explanation)}")
 
         lines.append("")
 

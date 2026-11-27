@@ -45,6 +45,10 @@ def test_cli_replay_needs_no_key(tmp_path, monkeypatch, capsys):
     s = settings()
     rec = run_pipeline(doc, s, client=TracingClient(FakeLLM(), trace, s))
     monkeypatch.setenv("GEMINI_API_KEY", "")
+    from validator.pipeline import toggles
+
+    for n in toggles.TOGGLES:
+        monkeypatch.setenv(n, "")  # the replay restores the recorded switches into os.environ
     out = tmp_path / "out.md"
     code = main([str(doc), str(out), "--replay", str(trace)])
     data = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
@@ -54,3 +58,23 @@ def test_cli_replay_needs_no_key(tmp_path, monkeypatch, capsys):
     assert main([str(doc), str(out), "--replay", str(trace)]) == 2
     assert "промпт изменился" in capsys.readouterr().err
     assert main([str(doc), str(out), "--replay", str(tmp_path / "none")]) == 2
+
+
+def test_replay_restores_switches_of_old_and_new_traces(monkeypatch):
+    from validator.pipeline import toggles
+    from validator.trace import prompt_env, restore_prompt_env
+
+    for n in toggles.TOGGLES:
+        monkeypatch.setenv(n, "")  # tracked: restore_prompt_env writes os.environ directly
+    monkeypatch.setenv("EXP_GLOSSARY", "1")
+    restore_prompt_env({"env": {}})  # an older trace lists only variables that were set: the rest were off
+    assert not any(toggles.enabled(n) for n in toggles.TOGGLES)
+    restore_prompt_env({"env": {"EXP_STATES": "1"}})
+    assert toggles.enabled("EXP_STATES") and not toggles.enabled("EXP_GLOSSARY")
+    for n in toggles.TOGGLES:
+        monkeypatch.setenv(n, "")
+    recorded = prompt_env()  # a new trace names every switch with its effective value
+    assert recorded["EXP_GLOSSARY"] == "1" and recorded["EXP_REMARKS"] == "0"
+    monkeypatch.setenv("EXP_GLOSSARY", "0")
+    restore_prompt_env({"env": recorded})
+    assert toggles.enabled("EXP_GLOSSARY")

@@ -228,7 +228,9 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     t_start = time.monotonic()
     run = _Run(settings, on_event)
     profile = settings.profile
-    no_review = os.getenv("EXP_NO_REVIEW", "").strip() == "1"
+    from validator.pipeline import toggles
+
+    no_review = toggles.enabled("EXP_NO_REVIEW")
     if no_review:
         profile = replace(profile, review=False)  # ablation (eval/ablate.py): the report without the critic
 
@@ -279,6 +281,15 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     review_reserve = 0.15 * settings.run_deadline if profile.review else 0.0
     ctx = StageContext(client=client, settings=settings, budget=budget, cache=cache, deadline=deadline,
                        review_reserve=review_reserve, note=run.note)
+    domain_choice = settings.domain or ("auto" if toggles.enabled("EXP_DOMAIN") else "none")
+    from validator import domains
+    from validator.pipeline.prompts.domain import render_domain_block
+
+    profile_obj, domain_note = domains.select(domain_choice, raw.text)
+    if profile_obj is not None:
+        ctx.domain_block = render_domain_block(profile_obj)
+    if domain_note:
+        run.warnings.append(domain_note[0].upper() + domain_note[1:] + ".")
     durations: list[float] = []  # seconds of finished model calls in this run
     index = QuoteIndex(doc)
     stats = pp.Stats()
@@ -341,6 +352,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     builder = pp.CandidateBuilder(doc, reqs, index, stats)
     candidates: list[pp.Candidate] = builder.from_rules(pre.findings)
     counts: dict[str, int] = {"rules": len(candidates)}
+    remarks: list[pp.Candidate] = []  # possible gaps from the check (EXP_REMARKS)
     coverage: list[CoverageRow] = []
     checked: set[str] = set()
     check_ok = False
@@ -360,6 +372,9 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     # ---------------------------------------------------------- wave: check batches + set checks
     batches = [] if answers_mode else make_batches(reqs, profile)
+    for name, on in toggles.non_default():
+        if name != "EXP_NO_REVIEW":
+            run.warnings.append(f"{'Включён' if on else 'Выключен'} режим {name} (не по умолчанию).")
     if no_review:
         run.warnings.append("Критический пересмотр отключён (EXP_NO_REVIEW=1): отчёт для абляции.")
     from validator.pipeline.stages import STAGE_MODEL_ENV
@@ -462,6 +477,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                 stats.dropped_schema_items += r.dropped_items
                 data: LLMCheck = r.data
                 cands, seen = builder.from_check(data.results)
+                remarks.extend(builder.from_remarks(data.results))
                 candidates.extend(cands)
                 checked |= seen
                 missing.extend(x for x in b if x.id not in seen)
@@ -479,6 +495,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                     r = run_check_batch(ctx, doc, topup, reqs, pre.hints)
                     run.account(StageKey.CHECK, r)
                     cands, seen = builder.from_check(r.data.results)
+                    remarks.extend(builder.from_remarks(r.data.results))
                     candidates.extend(cands)
                     checked |= seen
                 except LLMError as exc:
@@ -601,6 +618,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     # ---------------------------------------------------------- assemble
     run.emit(StageKey.ASSEMBLE, StageState.RUNNING)
     candidates = pp.drop_unconfirmed_anchored(candidates, reviewed, stats)
+    # remarks join after the critic: only those about a place no kept finding covers
+    candidates += pp.place_remarks(remarks, candidates)
     candidates, folded = pp.fold_rule_twins(candidates)
     stats.merged += folded
     findings, set_findings = pp.finalize(candidates, reqs)

@@ -131,6 +131,7 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
         if ids:
             by_class[cls.value] = ids
     return Summary(
+        remarks_total=sum(1 for f in findings if getattr(f, "remark", False)),
         requirements_total=len(reqs),
         requirements_by_kind=dict(Counter(r.kind.value for r in reqs)),
         requirements_with_findings=len(with_findings),

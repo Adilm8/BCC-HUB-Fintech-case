@@ -49,5 +49,16 @@ def make_batches(reqs: list[Requirement], profile: Profile) -> list[list[Require
 
 def run_check_batch(ctx: StageContext, doc: Document, batch: list[Requirement], all_reqs: list[Requirement],
                     hints: list[Hint]) -> StructuredResult:
-    prompt = build_check_prompt(doc, batch, all_reqs, hints, include_document=ctx.include_document(doc.char_count))
-    return ctx.call("check", LLMCheck, prompt, system_prompt())
+    from validator.pipeline import toggles
+    from validator.pipeline.prompts.io import LLMCheckWithRemarks
+
+    remarks = toggles.enabled("EXP_REMARKS")
+    terms = ""
+    if toggles.enabled("EXP_GLOSSARY"):
+        from validator.pipeline.glossary import terms_block
+
+        terms = terms_block(batch, all_reqs)
+    prompt = build_check_prompt(doc, batch, all_reqs, hints, include_document=ctx.include_document(doc.char_count),
+                                remarks=remarks, completeness_items=toggles.enabled("EXP_COMPLETENESS_ITEMS"),
+                                domain=ctx.domain_block, terms=terms)
+    return ctx.call("check", LLMCheckWithRemarks if remarks else LLMCheck, prompt, system_prompt())

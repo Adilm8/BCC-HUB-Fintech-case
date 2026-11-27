@@ -370,6 +370,7 @@ class Candidate:
     related: list[str] = field(default_factory=list)
     option_consequences: list[str] = field(default_factory=list)
     previous_ids: list[str] = field(default_factory=list)
+    remark: bool = False  # a possible gap noted in doubt: always minor, no question
 
     @property
     def is_set(self) -> bool:
@@ -554,6 +555,20 @@ class CandidateBuilder:
                                      [frid], FindingSource.LLM, needs_confirmation=needs_conf,
                                      addressee=f.addressee, option_consequences=cons))
         return out, seen
+
+    def from_remarks(self, results) -> list[Candidate]:
+        """Remarks with a quote found in the document; anything else is dropped like an unverified finding."""
+        out: list[Candidate] = []
+        for res in results:
+            rid = self.resolve_req(res.requirement_id)
+            for r in getattr(res, "remarks", [])[:2]:
+                ev = self.evidence(r.quote, rid) if r.quote.strip() else None
+                if ev is None or not ev.requirement_id or not r.text.strip():
+                    self.stats.dropped_unverified_quotes += 1
+                    continue
+                out.append(Candidate(Criterion(r.criterion), Severity.MINOR, [ev], r.text.strip(), "", "", [],
+                                     [ev.requirement_id], FindingSource.LLM, remark=True))
+        return out
 
     def from_set(self, findings: list[LLMSetFinding], source: FindingSource = FindingSource.LLM) -> list[Candidate]:
         out = []
@@ -1132,6 +1147,20 @@ def fold_rule_twins(cands: list[Candidate]) -> tuple[list[Candidate], int]:
     return [c for c in cands if id(c) not in removed], folded
 
 
+def place_remarks(remarks: list[Candidate], kept: list[Candidate]) -> list[Candidate]:
+    """Remarks about places no kept finding of the requirement itself covers, one per place."""
+    out: list[Candidate] = []
+    for r in remarks:
+        if any(r.block_ids & c.block_ids for c in kept
+               if not c.is_set and set(c.requirement_ids) & set(r.requirement_ids)):
+            continue
+        if any(r.block_ids & o.block_ids and r.criterion == o.criterion for o in out):
+            continue
+        r.severity = Severity.MINOR
+        out.append(r)
+    return out
+
+
 def drop_unconfirmed_anchored(cands: list[Candidate], reviewed: bool, stats: Stats) -> list[Candidate]:
     """Findings with only an anchored quote stay only if the critic confirmed them."""
     out = []
@@ -1281,7 +1310,8 @@ _TEST_STUB_CONSEQUENCES = [
     "В {loc} добавляется ссылка на отдельный документ QA; пробел по тестированию снимается.",
 ]
 # who answers questions of the deterministic gap rules
-RULE_ADDRESSEE = {"units_mismatch": "analyst", "idempotency_without_key": "architect",
+RULE_ADDRESSEE = {"units_mismatch": "analyst", "idempotency_without_key": "architect", "boundary_tests_missing": "qa",
+                  "non_singular": "analyst", "undefined_term": "analyst", "integration_without_failure": "architect",
                   "flag_with_mandatory_params": "analyst", "one_line_process": "business"}
 
 
@@ -1431,7 +1461,7 @@ def finalize(cands: list[Candidate], reqs: list[Requirement]) -> tuple[list[Find
             evidence=c.evidence, explanation=c.explanation, recommendation=c.recommendation,
             clarifying_question=c.question, answer_options=c.options, option_consequences=c.option_consequences,
             source=c.source, review_note=c.review_note,
-            requirement_ids=c.requirement_ids, addressee=c.addressee, related_notes=c.related,
+            requirement_ids=c.requirement_ids, addressee=c.addressee, related_notes=c.related, remark=c.remark,
         ))
     for i, c in enumerate(sets, 1):
         c.final_id = f"S-{i:03d}"

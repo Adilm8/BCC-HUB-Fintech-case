@@ -85,6 +85,11 @@ ledger верни пустым списком. Не больше 12 находо
 согласованные с функциональными правилами; описание одной строкой без них — пробел (missing_requirement);
 - документ: версия, приоритеты требований, согласование, откат."""
 
+STATES_LENS = """6. Состояния (missing_scenario, criterion set_complete): для каждой сущности со статусами, флагами или \
+режимами (активна и заблокирована, включено и выключено, черновик и подтверждено и т.п.) составь таблицу \
+«состояние × событие» по значимым событиям документа и проверь, что реакция задана для каждого сочетания. \
+Незаданные сочетания — одна находка на сущность с их перечнем; цитата — место, где задаются состояния."""
+
 MERGED_TASK = """Выполни оба задания в одном ответе: сначала S1, затем S2. Общий лимит — 16 находок."""
 
 AUTHOR_ANSWERS_NOTE = (
@@ -124,7 +129,8 @@ def build_s1_prompt(doc: Document, reqs: list[Requirement], inventory: list[Inve
 
 
 def build_s2_prompt(doc: Document, reqs: list[Requirement], skipped: list[SkippedBlock], *,
-                    include_document: bool = True, author_answers: str = "") -> str:
+                    include_document: bool = True, author_answers: str = "", domain: str = "",
+                    states: bool = False) -> str:
     parts = _common(doc, reqs, include_document)
     acc = [r for r in reqs if r.kind == ReqKind.ACCEPTANCE_CRITERION]
     parts.append("<acceptance_criteria>\n" + (requirement_table(acc) if acc else "в документе нет критериев приёмки")
@@ -134,8 +140,13 @@ def build_s2_prompt(doc: Document, reqs: list[Requirement], skipped: list[Skippe
                      + "\n</skipped_blocks>")
     if author_answers:
         parts.append(author_answers)
+    if domain:
+        parts.append(domain)
     parts.append(SET_EXAMPLES)
-    task = S2_TASK + ("\n\n" + AUTHOR_ANSWERS_NOTE if author_answers else "")
+    task = S2_TASK
+    if states:
+        task = task.replace("\nДля находки-пропуска цитата", "\n" + STATES_LENS + "\nДля находки-пропуска цитата", 1)
+    task += ("\n\n" + AUTHOR_ANSWERS_NOTE) if author_answers else ""
     parts.append(task)
     return "\n\n".join(parts)
 

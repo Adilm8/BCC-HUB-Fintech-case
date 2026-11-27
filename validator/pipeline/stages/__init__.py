@@ -29,6 +29,7 @@ class StageContext:
     deadline: float
     review_reserve: float = 0.0  # seconds kept for the critic: other stages stop earlier
     note: Callable[[str, str], None] | None = None  # (stage, note) progress sink
+    domain_block: str = ""  # domain checklist for the check and S2 prompts (validator/domains)
 
     def call(self, stage: str, model_cls, prompt: str, system: str) -> StructuredResult:
         set_stage = getattr(self.client, "set_stage", None)

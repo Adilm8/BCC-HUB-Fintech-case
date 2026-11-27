@@ -86,6 +86,8 @@ def _main(argv: list[str] | None) -> int:
                         help="записать все запросы к модели и ответы прогона в папку (без ключей)")
     parser.add_argument("--replay", type=Path, default=None, metavar="DIR",
                         help="повторить прогон по записанной трассе: без ключа и без сети")
+    parser.add_argument("--domain", default=None, metavar="NAME|auto|none",
+                        help="доменный чек-лист из validator/domains (по умолчанию DOMAIN_PROFILE или none)")
     parser.add_argument("--rules-only", action="store_true",
                         help="проверить только правилами, без модели (ключ не нужен; итог не определён)")
     parser.add_argument("--questions-template", nargs=2, type=Path, metavar=("REPORT_JSON", "ANSWERS_YAML"),
@@ -164,11 +166,14 @@ def _main(argv: list[str] | None) -> int:
             restore_prompt_env(m)
             overrides.update(model=m.get("model", settings.model), fallback_models=tuple(m.get("fallback_models", ())),
                              profile_name=m.get("profile", settings.profile_name),
-                             max_context_chars=int(m.get("max_context_chars", settings.max_context_chars)))
+                             max_context_chars=int(m.get("max_context_chars", settings.max_context_chars)),
+                             domain=m.get("domain", ""))
             if replay.provider in PROVIDERS:
                 overrides["provider"] = replay.provider
         if args.profile:
             overrides["profile_name"] = args.profile
+        if args.domain is not None:
+            overrides["domain"] = args.domain.strip().lower()
         if args.no_cache:
             overrides["cache_enabled"] = False
         if overrides:

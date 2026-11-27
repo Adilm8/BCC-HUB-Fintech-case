@@ -54,7 +54,7 @@ class TracingClient(_StageMixin):
         manifest = {"version": TRACE_VERSION, "provider": getattr(inner, "provider", settings.provider),
                     "family": family(getattr(inner, "provider", settings.provider)), "model": settings.model,
                     "fallback_models": list(settings.fallback_models), "profile": settings.profile_name,
-                    "max_context_chars": settings.max_context_chars, "env": prompt_env()}
+                    "max_context_chars": settings.max_context_chars, "domain": settings.domain, "env": prompt_env()}
         (self.directory / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def __getattr__(self, name):
@@ -96,13 +96,21 @@ class TracingClient(_StageMixin):
 
 
 def prompt_env() -> dict[str, str]:
-    return {k: v for k, v in sorted(os.environ.items()) if k.startswith(PROMPT_ENV_PREFIXES) and v.strip()}
+    from validator.pipeline import toggles
+
+    env = {k: v for k, v in sorted(os.environ.items()) if k.startswith(PROMPT_ENV_PREFIXES) and v.strip()}
+    env.update(toggles.effective())  # explicit values: a later change of defaults does not change the replay
+    return env
 
 
 def restore_prompt_env(manifest: dict) -> None:
-    """The replay runs with exactly the switches of the recorded run."""
+    """The replay runs with exactly the switches of the recorded run. A switch the manifest does not name was
+    off when it was recorded (older traces list only the variables that were set)."""
+    from validator.pipeline import toggles
+
     for k in [k for k in os.environ if k.startswith(PROMPT_ENV_PREFIXES)]:
         del os.environ[k]
+    os.environ.update({n: "0" for n in toggles.TOGGLES})
     os.environ.update({k: str(v) for k, v in (manifest.get("env") or {}).items()})
 
 

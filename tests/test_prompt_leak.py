@@ -34,8 +34,12 @@ GOLD_FILES = [*sorted((ROOT / "eval" / "gold").glob("*.json")),
               *sorted((ROOT / "eval" / "gold_private").glob("*.json"))]
 
 
+DOMAINS = ROOT / "validator" / "domains"
+
+
 def prompt_files() -> list[Path]:
-    return sorted(p for p in PROMPTS.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
+    files = [p for p in PROMPTS.rglob("*") if p.is_file() and "__pycache__" not in p.parts]
+    return sorted(files + list(DOMAINS.glob("*.yaml")))
 
 
 def prompt_text() -> str:

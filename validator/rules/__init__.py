@@ -16,6 +16,18 @@ def run_prechecks(doc: Document) -> PrecheckResult:
         *run_api_lint(doc, base.inventory),
         *run_gap_checks(doc, base.inventory),
     ]
+    from validator.pipeline import toggles
+
+    if toggles.enabled("EXP_BOUNDARY_RULE"):
+        from validator.rules.boundaries import check_boundary_tests
+
+        extra_findings.extend(check_boundary_tests(doc))
+    from validator.rules import extra
+
+    for flag, check in (("EXP_SINGULAR_RULE", extra.check_non_singular), ("EXP_ABBREV_RULE", extra.check_undefined_terms),
+                        ("EXP_FAILURE_RULE", extra.check_integration_failures)):
+        if toggles.enabled(flag):
+            extra_findings.extend(check(doc))
     if not extra_findings:
         return base
     return PrecheckResult(

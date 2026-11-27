@@ -113,6 +113,7 @@ class Settings:
     cache_enabled: bool = True
     cache_dir: str = ".cache/validator"
     max_context_chars: int = 120_000
+    domain: str = ""  # domain profile: a name, "auto" or "none"; empty follows EXP_DOMAIN (on by default: auto)
 
     @property
     def run_deadline(self) -> float:
@@ -174,6 +175,7 @@ class Settings:
             cache_enabled=cache,
             cache_dir=os.getenv("PIPELINE_CACHE_DIR", "").strip() or ".cache/validator",
             max_context_chars=_int("MAX_CONTEXT_CHARS", 120_000),
+            domain=os.getenv("DOMAIN_PROFILE", "").strip().lower(),
         )
 
 

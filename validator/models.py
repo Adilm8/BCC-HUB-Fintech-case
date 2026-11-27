@@ -289,6 +289,7 @@ class BaseFinding(BaseModel):
 
 class Finding(BaseFinding):
     requirement_ids: list[str] = Field(min_length=1)
+    remark: bool = False  # a possible gap noted in doubt, not a confirmed defect: always minor, no question
 
 
 class SetFinding(BaseFinding):
@@ -350,6 +351,7 @@ class Summary(BaseModel):
     blocks_structural: int = 0  # headings and table headers
     blocks_other: int = 0  # short fragments and code examples not assigned to a requirement
     questions_in_findings: int = 0  # clarifying questions printed in finding cards
+    remarks_total: int = 0  # possible gaps noted in doubt (minor findings flagged `remark`)
 
 
 class FixItem(BaseModel):

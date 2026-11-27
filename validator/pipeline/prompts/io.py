@@ -59,6 +59,20 @@ class LLMCheck(BaseModel):
     results: list[LLMReqResult]
 
 
+class LLMRemark(BaseModel):
+    quote: str
+    criterion: Literal["complete", "unambiguous", "verifiable"]
+    text: str  # one line: what may be missing or ambiguous
+
+
+class LLMReqResultWithRemarks(LLMReqResult):
+    remarks: list[LLMRemark] = []  # required in the provider schema; a missing list is no remarks
+
+
+class LLMCheckWithRemarks(BaseModel):
+    results: list[LLMReqResultWithRemarks]
+
+
 class LLMEvidence(BaseModel):
     requirement_id: str
     quote: str
