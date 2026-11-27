@@ -45,7 +45,8 @@ GENERIC_PATTERNS = [
 ]
 _ROW_SKIP_KINDS = {BlockKind.HEADING, BlockKind.TABLE_HEADER}
 # deterministic facts about the document: the critic may lower them but not delete them as "generic"
-FACT_RULES = {"missing_req_ids", "no_ranking", "duplicate_id", "numbering_gap", "dangling_reference"}
+FACT_RULES = {"missing_req_ids", "no_ranking", "duplicate_id", "numbering_gap", "dangling_reference",
+              "units_mismatch", "idempotency_without_key", "flag_with_mandatory_params", "one_line_process"}
 _BLOCK_ID = re.compile(r"\bB\d{3,4}\b")
 _CAND_ID = re.compile(r"\b(?:см\.?\s+)?C\d{2,3}\b", re.IGNORECASE)
 _DUPLICATE_NOTE = re.compile(r"(дублир\w*|уже уч[её]т\w*|не добавля\w*)", re.IGNORECASE)
@@ -135,6 +136,8 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
     if extraction is not None:
         for s in extraction.skipped:
             for bid in s.block_ids:
+                if bid in blocks and _is_normative(blocks[bid]):
+                    continue  # a binding statement is never service text, whatever the model said
                 if bid in blocks and bid not in used:
                     skipped.append(SkippedBlock(block_id=bid, reason=s.reason, text=blocks[bid].text[:300]))
                     used.add(bid)
@@ -192,6 +195,7 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
         )))
         added += 1
     raw = _code_blocks_to_own_section(raw, blocks, index, doc)
+    raw = _coarsen_table_rows(raw, blocks, index, doc)
     raw.sort(key=lambda t: t[0])
     # two different requirements never share a title: fall back to each one's own quote
     seen_titles: dict[str, int] = {}
@@ -208,6 +212,20 @@ def build_requirements(doc: Document, extraction: LLMExtraction | None, index: Q
 
 
 _NORMATIVE = re.compile(r"(должн|обязан|\bshall\b|\bmust\b)", re.IGNORECASE)
+
+
+_REQUIREMENT_HEADING = re.compile(r"требован|requirement|правил|rule", re.IGNORECASE)
+
+
+def _is_normative(b) -> bool:
+    """A block that binds the system: a modal verb, or a list item or paragraph under a requirements heading."""
+    if b.kind in (BlockKind.HEADING, BlockKind.TABLE_HEADER, BlockKind.CODE):
+        return False
+    if _NORMATIVE.search(b.text):
+        return True
+    heading = b.section_path[-1] if b.section_path else ""
+    return (b.kind in (BlockKind.LIST_ITEM, BlockKind.PARAGRAPH) and bool(_REQUIREMENT_HEADING.search(heading))
+            and len(b.text) >= 20)
 
 
 def _is_meta_block(b, parts: list[str] | None = None) -> bool:
@@ -241,12 +259,71 @@ def _code_blocks_to_own_section(raw, blocks, index, doc):
             out[host] = (pos, r.model_copy(update={"block_ids": ids, "quote": " ".join(blocks[b].text for b in ids)}))
         else:
             b = blocks[bid]
-            out.append((index.block_order(bid), Requirement(
-                id="", doc_id=None, id_assigned=True, kind=ReqKind.INTERFACE, part=b.part,
-                section=section_label(b.section_path, doc.title), block_ids=[bid],
-                title=short_text(f"Пример: {b.section_path[-1] if b.section_path else b.text}"), quote=b.text,
-                source="llm")))
+            above = [i for i, (_, r) in enumerate(out)
+                     if blocks[r.block_ids[0]].part == b.part and index.block_order(r.block_ids[0]) < index.block_order(bid)]
+            if above:
+                host = max(above, key=lambda i: index.block_order(out[i][1].block_ids[-1]))
+                pos, r = out[host]
+                ids = sorted([*r.block_ids, bid], key=index.block_order)
+                out[host] = (pos, r.model_copy(update={"block_ids": ids}))
+            else:
+                out.append((index.block_order(bid), Requirement(
+                    id="", doc_id=None, id_assigned=True, kind=ReqKind.INTERFACE, part=b.part,
+                    section=section_label(b.section_path, doc.title), block_ids=[bid],
+                    title=short_text(f"Пример: {b.section_path[-1] if b.section_path else b.text}"), quote=b.text,
+                    source="llm")))
     return out
+
+
+_COARSE_KINDS = {ReqKind.INTERFACE, ReqKind.DATA}
+
+
+def _table_key(bid: str, blocks, index) -> tuple[str, int] | None:
+    """The table a row belongs to: its section plus the position of the first row of the run of table rows."""
+    b = blocks[bid]
+    if b.kind != BlockKind.TABLE_ROW:
+        return None
+    order = index.block_order(bid)
+    start = order
+    ids = index.block_ids
+    while start > 0:
+        prev = blocks[ids[start - 1]]
+        if prev.kind not in (BlockKind.TABLE_ROW, BlockKind.TABLE_HEADER) or prev.section_id != b.section_id:
+            break
+        start -= 1
+    return b.section_id, start
+
+
+def _coarsen_table_rows(raw, blocks, index, doc):
+    """Interface or data requirements that are single rows of the same table become one requirement per table.
+
+    Done in code, whatever granularity the model chose; acceptance criteria and rules stay one row each."""
+    groups: dict[tuple[str, int], list[int]] = {}
+    for i, (_, r) in enumerate(raw):
+        if r.kind not in _COARSE_KINDS:
+            continue
+        keys = {_table_key(b, blocks, index) for b in r.block_ids}
+        if len(keys) != 1 or None in keys:
+            continue
+        groups.setdefault(next(iter(keys)), []).append(i)
+    drop: set[int] = set()
+    for (sec_id, _), members in groups.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda i: raw[i][0])
+        ids = sorted({b for i in members for b in raw[i][1].block_ids}, key=index.block_order)
+        first_pos, first = raw[members[0]]
+        sec = next((s for s in doc.sections if s.id == sec_id), None)
+        names = [blocks[b].cells[0] if blocks[b].cells else blocks[b].text.split(" | ")[0] for b in ids]
+        title = short_text(f"Таблица «{sec.title if sec else first.section}»: " + ", ".join(n for n in names if n))
+        doc_ids = [raw[i][1].doc_id for i in members if raw[i][1].doc_id]
+        merged = first.model_copy(update={
+            "block_ids": ids, "quote": "; ".join(blocks[b].text for b in ids), "title": title,
+            "doc_id": doc_ids[0] if doc_ids else first.doc_id, "id_assigned": not doc_ids and first.id_assigned,
+        })
+        raw[members[0]] = (first_pos, merged)
+        drop.update(members[1:])
+    return [x for i, x in enumerate(raw) if i not in drop]
 
 
 def _doc_id(candidate: str, blocks) -> str | None:
@@ -355,6 +432,11 @@ class CandidateBuilder:
         m = self.index.find(quote, prefer)
         if m is None:
             return None
+        if m.section_id is not None:
+            # a heading: the evidence points at its section, not at a requirement
+            sec = next(s for s in self.doc.sections if s.id == m.section_id)
+            return Evidence(quote=m.text, section=section_label(sec.path, self.doc.title), requirement_id=None,
+                            block_ids=m.block_ids, quote_status=m.status)
         # the requirement is the one that owns the matched text, not the one the model named
         if rid is None or not set(m.block_ids) & set(self.reqs[rid].block_ids):
             rid = next((self._block_req[b] for b in m.block_ids if b in self._block_req), None)
@@ -759,11 +841,13 @@ def assign_candidate_ids(cands: list[Candidate]) -> None:
 def candidates_for_review(cands: list[Candidate], limit_chars: int = 60000) -> str:
     lines = []
     for c in cands:
-        quotes = " || ".join(f"«{e.quote[:200]}» [{e.quote_status.value}]" for e in c.evidence[:3])
+        from validator.pipeline.prompts.render import safe
+
+        quotes = " || ".join(f"«{safe(e.quote[:200])}» [{e.quote_status.value}]" for e in c.evidence[:3])
         kind = c.set_check.value if c.set_check else "requirement"
         lines.append(
             f"{c.cid} | {','.join(c.requirement_ids) or '—'} | {kind} | {c.criterion.value} | {c.severity.value} | "
-            f"{quotes} | {c.explanation[:400]} | вопрос: {c.question[:200]}"
+            f"{quotes} | {safe(c.explanation[:400])} | вопрос: {safe(c.question[:200])}"
         )
     text = "\n".join(lines)
     return text[:limit_chars]
@@ -826,11 +910,11 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
                     dropped.add(c.cid)
                     stats.dropped_by_review += 1
                 else:
-                    c.confirmed = True  # unproven drop: the finding stays
+                    # unproven drop: the finding stays, but an anchored one is not confirmed by it
                     c.review_note = "критик предложил удалить без подтверждающей цитаты; находка оставлена"
             elif d.drop_reason in ("generic", "out_of_scope"):
-                if c.two_quote_contradiction or c.keep:
-                    c.confirmed = True
+                if c.two_quote_contradiction or c.keep or c.source == FindingSource.RULE:
+                    c.confirmed = True  # deterministic findings are removed only with a quote that disproves them
                     continue
                 anchored = all(e.quote_status == QuoteStatus.ANCHORED for e in c.evidence)
                 if c.severity != Severity.MINOR and not anchored and c.source != FindingSource.RULE:
@@ -859,11 +943,76 @@ def apply_review(cands: list[Candidate], review: LLMReview, builder: CandidateBu
     return kept, ReviewOutcome(fix[:7], review.verdict_rationale.strip(), missed)
 
 
+_FOLD_CODE = re.compile(r"(?<![\d.,])([1-5]\d\d)(?!\d)")
+_FOLD_METHOD = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\b")
+_FOLD_WRITE = re.compile(r"сохран|измен|модиф|запис|замен", re.IGNORECASE)
+_FOLD_CRITERIA = {Criterion.CORRECT, Criterion.SET_CONSISTENT, Criterion.UNAMBIGUOUS}
+_HTTP_CODES = {"200", "201", "204", "400", "401", "403", "404", "409", "422", "500"}
+
+
+def _own_text(c: Candidate) -> str:
+    return f"{c.explanation} {c.question}"
+
+
+def _codes(c: Candidate, *, with_quotes: bool = False) -> set[str]:
+    text = _own_text(c)
+    if with_quotes:
+        text += " " + " ".join(f"{e.quote} {e.section}" for e in c.evidence)
+    return {x for x in _FOLD_CODE.findall(text) if x in _HTTP_CODES}
+
+
+def _fold_twin(rule: Candidate, other: Candidate) -> bool:
+    """The model finding describes the same interface defect as the linter finding (same place, same codes or
+    the same method used for a write)."""
+    if not (rule.block_ids & other.block_ids) or SEVERITY_RANK[other.severity] > SEVERITY_RANK[Severity.MAJOR]:
+        return False
+    rc, rm = _codes(rule), set(_FOLD_METHOD.findall(_own_text(rule)))
+    if len(rc) >= 2:
+        return len(rc & _codes(other, with_quotes=True)) >= 2 and len(rc & _codes(other)) >= 1
+    if rm:
+        return bool(rm & set(_FOLD_METHOD.findall(_own_text(other)))) and bool(_FOLD_WRITE.search(_own_text(other)))
+    if len(rc) == 1:
+        return bool(rc & _codes(other))
+    return False
+
+
+def fold_rule_twins(cands: list[Candidate]) -> tuple[list[Candidate], int]:
+    """After the critic: a linter card absorbs at most one model twin about the same interface defect.
+
+    The linter card keeps its text, options and severity floor (raised to the twin's if higher); the twin's
+    explanation becomes a related note, its quotes and requirements are added. Pure: returns a new list."""
+    removed: set[int] = set()
+    folded = 0
+    for rule in cands:
+        if rule.source != FindingSource.RULE or not rule.rule.startswith("api_") or rule.criterion not in _FOLD_CRITERIA:
+            continue
+        twins = [o for o in cands if o.source != FindingSource.RULE and id(o) not in removed and _fold_twin(rule, o)]
+        if not twins:
+            continue
+        twin = min(twins, key=lambda o: (SEVERITY_RANK[o.severity], 0 if o.is_set else 1, -len(o.evidence)))
+        if SEVERITY_RANK[twin.severity] < SEVERITY_RANK[rule.severity]:
+            rule.severity = twin.severity
+        note = _sentence(twin.explanation) if twin.explanation else ""
+        if note and note not in rule.related:
+            rule.related = [note, *rule.related][:4]
+        seen = {normalize(e.quote) for e in rule.evidence}
+        rule.evidence += [e for e in twin.evidence if normalize(e.quote) not in seen][:3]
+        for r in twin.requirement_ids:
+            if r not in rule.requirement_ids:
+                rule.requirement_ids.append(r)
+        if twin.set_check is not None and rule.set_check is None:
+            rule.set_check = twin.set_check
+        rule.confirmed = True
+        removed.add(id(twin))
+        folded += 1
+    return [c for c in cands if id(c) not in removed], folded
+
+
 def drop_unconfirmed_anchored(cands: list[Candidate], reviewed: bool, stats: Stats) -> list[Candidate]:
     """Findings with only an anchored quote stay only if the critic confirmed them."""
     out = []
     for c in cands:
-        if c.needs_confirmation and reviewed and not c.confirmed:
+        if c.needs_confirmation and not c.confirmed:
             stats.dropped_unconfirmed += 1
             continue
         out.append(c)
@@ -907,7 +1056,18 @@ RULE_OPTIONS: dict[str, list[str]] = {
                                    "Различие намеренное: описать преобразование типа"],
     "api_body_content_type_unused": ["Убрать Content-Type для запроса без тела", "Описать тело запроса"],
     "api_get_with_body": ["Убрать тело из запроса GET", "Сменить метод на POST или PUT"],
+    "units_mismatch": ["Хранить и сравнивать в одной единице, указать её в требовании",
+                       "Оставить разные единицы и описать правило пересчёта и округления"],
+    "idempotency_without_key": ["Повтор распознаётся по идентификатору операции или события; указать окно хранения",
+                                "Повторная доставка невозможна по контракту источника: зафиксировать это"],
+    "flag_with_mandatory_params": ["При выключенном признаке остальные параметры необязательны и не проверяются",
+                                   "Параметры обязательны всегда: описать, что с ними делать при выключении"],
+    "one_line_process": ["Описать участников, шаги и ветки отказов в отдельной схеме процесса",
+                         "Схема иллюстративная: сослаться на функциональные требования как на основной источник"],
 }
+# who answers questions of the deterministic gap rules
+RULE_ADDRESSEE = {"units_mismatch": "analyst", "idempotency_without_key": "architect",
+                  "flag_with_mandatory_params": "analyst", "one_line_process": "business"}
 def rule_options(c: Candidate) -> list[str]:
     where = " ".join([c.explanation, *(e.section for e in c.evidence)])
     if c.rule in ("placeholder", "empty_section") and re.search(r"тестир", where, re.IGNORECASE):
@@ -928,6 +1088,8 @@ def infer_addressee(c: Candidate, reqs: dict[str, Requirement]) -> str:
         return c.addressee
     text = f"{c.explanation} {c.question}"
     if c.source == FindingSource.RULE:
+        if c.rule in RULE_ADDRESSEE:
+            return RULE_ADDRESSEE[c.rule]
         if c.rule.startswith("api_"):
             return "analyst"  # interface contract questions go to the API owner
         where = " ".join([text, *(e.section for e in c.evidence), *(e.quote for e in c.evidence)])

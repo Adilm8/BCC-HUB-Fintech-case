@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from validator import __version__
-from validator.config import Settings
+from validator.config import SEQUENTIAL_PROVIDERS, Settings, family
 from validator.llm import LLMClient, LLMError, make_client
 from validator.models import (
     STAGE_TITLES,
@@ -51,7 +51,7 @@ from validator.pipeline.verdict import build_questions, build_summary, build_ver
 LLM_STAGES = (StageKey.EXTRACT, StageKey.CHECK, StageKey.SET_CHECK, StageKey.REVIEW)
 FATAL_KINDS = {"quota_daily", "deadline", "auth", "network"}
 TOPUP_LIMIT = 40
-PAIR_LENS_PROVIDERS: set[str] = {"gemini"}  # providers that get the separate rule-pair call (S1b)
+PAIR_LENS_PROVIDERS: set[str] = set()  # providers that get a separate rule-pair call; the lens lives in S1
 LONG_DOC_DETAIL = "документ слишком длинный для одного вызова: нарезка правилами"
 
 REASONS = {
@@ -90,7 +90,7 @@ def agent_version() -> str:
     root = Path(__file__).resolve().parents[2]
     try:
         out = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"], capture_output=True, text=True,
-                             check=True, cwd=root, timeout=5).stdout.strip()
+                             encoding="utf-8", errors="replace", check=True, cwd=root, timeout=5).stdout.strip()
         return f"{__version__} ({out})" if out else __version__
     except (OSError, subprocess.SubprocessError):
         return __version__
@@ -302,7 +302,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
 
     # ---------------------------------------------------------- wave: check batches + set checks
     batch_profile = profile
-    if getattr(client, "provider", "") in PAIR_LENS_PROVIDERS and not profile.merge_set_checks:
+    if family(getattr(client, "provider", "")) in PAIR_LENS_PROVIDERS and not profile.merge_set_checks:
         # the extra rule-pair call is paid for with one check batch: the run stays within 7 calls
         batch_profile = replace(profile, max_batches=min(profile.max_batches, 2))
     batches = make_batches(reqs, batch_profile)
@@ -317,10 +317,13 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
             return max(45.0, 1.2 * done[len(done) // 2]) if done else 90.0
 
         stage_seconds: dict[StageKey, float] = {StageKey.CHECK: 0.0, StageKey.SET_CHECK: 0.0}
+        doomed: list[str] = []  # set by the first fatal error: later tasks are skipped, not started
 
         def timed(fn: Callable[[], StructuredResult], *, optional: bool,
                   key: StageKey = StageKey.SET_CHECK) -> Callable[[], StructuredResult]:
             def task() -> StructuredResult:
+                if doomed:
+                    raise LLMError(f"пропущено: {doomed[0]}", "skipped")
                 left = deadline - review_reserve - time.monotonic()
                 need = typical_call()
                 if optional and left < need:
@@ -329,6 +332,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                 t0 = time.monotonic()
                 try:
                     res = fn()
+                except LLMError as exc:
+                    if exc.kind in FATAL_KINDS and not doomed:
+                        doomed.append(REASONS.get(exc.kind, REASONS["other"]))
+                    raise
                 finally:
                     stage_seconds[key] += time.monotonic() - t0
                 durations.append(time.monotonic() - t0)
@@ -344,10 +351,10 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         else:
             set_tasks = [("set:s1", timed(lambda: run_s1(ctx, doc, reqs, pre.inventory), optional=False)),
                          ("set:s2", timed(lambda: run_s2(ctx, doc, reqs, ext.skipped), optional=False))]
-            if getattr(client, "provider", "") in PAIR_LENS_PROVIDERS:
+            if family(getattr(client, "provider", "")) in PAIR_LENS_PROVIDERS:
                 # a smaller model misses conflicts between two functional rules: one short dedicated call
                 set_tasks.insert(1, ("set:s1b", timed(lambda: run_pairs(ctx, doc, reqs), optional=True)))
-        workers = 1 if getattr(client, "provider", "") == "gemini" else max(1, profile.parallel)
+        workers = 1 if getattr(client, "provider", "") in SEQUENTIAL_PROVIDERS else max(1, profile.parallel)
         # one call at a time: the set checks find the critical contradictions, so they go first and the
         # per-requirement batches are the ones dropped when time runs out
         tasks = set_tasks + check_tasks if workers == 1 else check_tasks + set_tasks
@@ -392,7 +399,7 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
         to_retry = missing + [x for b in failed_batches for x in b]
         reserve = 1 if profile.review else 0
         enough_time = deadline - review_reserve - time.monotonic() > typical_call()
-        if to_retry and not fatal and budget.remaining > reserve and enough_time:
+        if to_retry and not fatal and not doomed and budget.remaining > reserve and enough_time:
             topup = to_retry[:TOPUP_LIMIT]
             try:
                 r = run_check_batch(ctx, doc, topup, reqs, pre.hints)
@@ -404,12 +411,12 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                 run.account(StageKey.CHECK, None, getattr(exc, "responses", None))
                 fatal_from(exc)
         check_ok = bool(checked)
+        counts["check"] = sum(1 for c in candidates if c.source == FindingSource.LLM)
         not_checked = [x for x in reqs if x.id not in checked]
         if check_ok:
             n_check = sum(1 for c in candidates if c.source == FindingSource.LLM)
             detail = (f"батчей: {len(batches)}, проверено требований: {len(checked)} из {len(reqs)}, "
                       f"кандидатов: {n_check}")
-            counts["check"] = n_check
             run.emit(StageKey.CHECK, run.finished_state(StageKey.CHECK), detail)
             if not_checked:
                 run.warnings.append(f"Не проверено требований: {len(not_checked)} "
@@ -515,6 +522,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
     # ---------------------------------------------------------- assemble
     run.emit(StageKey.ASSEMBLE, StageState.RUNNING)
     candidates = pp.drop_unconfirmed_anchored(candidates, reviewed, stats)
+    candidates, folded = pp.fold_rule_twins(candidates)
+    stats.merged += folded
     findings, set_findings = pp.finalize(candidates, reqs)
     by_cid = {c.cid: c.final_id for c in candidates if c.cid}
     critic_order = [by_cid[x] for x in fix_order if x in by_cid]
@@ -524,7 +533,8 @@ def run_pipeline(source: Path | RawDocument, settings: Settings, *,
                             dropped_unverified=stats.dropped_unverified_quotes,
                             dropped_by_review=stats.dropped_by_review, candidates=counts,
                             dropped_unconfirmed=stats.dropped_unconfirmed)
-    verdict = build_verdict(reqs, findings, set_findings, coverage, critic_order=critic_order, rationale=rationale)
+    verdict = build_verdict(reqs, findings, set_findings, coverage, critic_order=critic_order, rationale=rationale,
+                            run_status=_status(run, profile.review).value)
     in_reqs = {b for r in reqs for b in r.block_ids}
     skipped_ids = {s.block_id for s in ext.skipped} - in_reqs
     structural = {b.id for b in doc.blocks if b.kind in (BlockKind.HEADING, BlockKind.TABLE_HEADER)}

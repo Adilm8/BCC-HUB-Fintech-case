@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import hashlib
+import io
 import logging
 import math
 import re
@@ -41,8 +42,9 @@ _PAGE_NUM_RE = re.compile(
     re.IGNORECASE,
 )
 _HEADING_KEYWORD_RE = re.compile(
-    r"^(?:Часть|Раздел|Глава|Приложение|Part|Section|Chapter|Appendix)\s+[A-ZА-ЯЁ0-9]+(?:[.\s:–—-].*)?$",
-    re.IGNORECASE,
+    r"^(?:Часть|ЧАСТЬ|Раздел|РАЗДЕЛ|Глава|ГЛАВА|Приложение|ПРИЛОЖЕНИЕ"
+    r"|Part|PART|Section|SECTION|Chapter|CHAPTER|Appendix|APPENDIX)"
+    r"\s+(?:\d+(?:\.\d+)*|[A-ZА-ЯЁ]|[IVX]{1,4})(?:[.\s:–—-].*)?$"
 )
 _MULTILEVEL_NUM_HEADING_RE = re.compile(r"^([1-9]\d*(?:\.\d+)+)\.?\s+([А-ЯЁA-Z].*)$")
 _SINGLE_NUM_HEADING_RE = re.compile(r"^([1-9]\d*)\.\s+([А-ЯЁA-Z].*)$")
@@ -67,6 +69,14 @@ class _PageLine:
     text: str
     font_size: float | None = None
     bold: bool = False
+
+
+@dataclass
+class _PageTable:
+    rows: list[list[str]]
+
+
+_PageItem = _PageLine | _PageTable
 
 
 def load_document(path: Path) -> RawDocument:
@@ -341,60 +351,39 @@ def _docx_has_body_nodes(doc: object, local_names: tuple[str, ...]) -> bool:
 
 
 def _pdf_to_markdown(path: Path) -> tuple[str, list[str]]:
-    """Extract PDF text per page, strip repeated headers/footers, de-hyphenate, and detect headings."""
-    from pypdf import PdfReader
-    from pypdf.errors import PdfReadError
+    """Extract PDF text and tables per page, strip repeated headers/footers, de-hyphenate, detect headings."""
+    for logger_name in ("pypdf", "pdfminer", "pdfplumber"):
+        logging.getLogger(logger_name).setLevel(logging.ERROR)
 
-    logging.getLogger("pypdf").setLevel(logging.ERROR)
-
-    try:
-        reader = PdfReader(str(path))
-    except (PdfReadError, OSError, ValueError) as exc:
-        raise ValueError(f"Не удалось прочитать PDF-файл {path.name}: {exc}") from exc
-
-    if reader.is_encrypted:
-        try:
-            decrypted = reader.decrypt("")
-        except Exception as exc:
-            raise ValueError(
-                f"PDF-файл защищён паролем и не может быть прочитан: {path}"
-            ) from exc
-        if not decrypted:
-            raise ValueError(f"PDF-файл защищён паролем и не может быть прочитан: {path}")
-
-    if len(reader.pages) == 0:
-        raise ValueError(f"В PDF-документе нет страниц: {path}")
+    pdf_bytes = path.read_bytes()
+    raw_pages, has_images = _extract_pdf_pages(pdf_bytes, path)
 
     warnings: list[str] = []
-    has_images = False
-    raw_pages: list[list[_PageLine]] = []
-
-    for page in reader.pages:
-        if not has_images and _pdf_page_has_images(page):
-            has_images = True
-        page_lines = _extract_pdf_page_lines(page)
-        raw_pages.append(page_lines)
-
     if has_images:
         warnings.append(
             "В документе PDF есть изображения или диаграммы — они не анализировались."
         )
 
     cleaned_pages = _strip_repeated_headers_footers(raw_pages)
-    all_lines = [line for page in cleaned_pages for line in page]
-    if not any(line.text.strip() for line in all_lines):
+    merged_pages = _merge_split_pdf_tables(cleaned_pages)
+
+    has_any_text = any(
+        (isinstance(item, _PageLine) and bool(item.text.strip()))
+        or (isinstance(item, _PageTable) and any(any(c.strip() for c in r) for r in item.rows))
+        for page in merged_pages
+        for item in page
+    )
+    if not has_any_text:
         raise ValueError(
             f"В PDF-документе нет текстового слоя (возможно, это скан): {path}"
         )
 
-    headed_pages = _apply_pdf_heading_heuristics(cleaned_pages)
+    headed_pages = _apply_pdf_heading_heuristics(merged_pages)
     page_texts: list[str] = []
     for page in headed_pages:
-        lines_text = [_normalize_pdf_line(ln.text) for ln in page]
-        joined = "\n".join(lines_text)
-        joined = _dehyphenate(joined)
-        if joined.strip():
-            page_texts.append(joined.strip())
+        rendered = _render_pdf_page(page)
+        if rendered.strip():
+            page_texts.append(rendered.strip())
 
     # Join pages and run de-hyphenation across page boundaries too.
     combined = "\n\n".join(page_texts)
@@ -411,6 +400,318 @@ def _pdf_to_markdown(path: Path) -> tuple[str, list[str]]:
         )
 
     return combined, warnings
+
+
+def _extract_pdf_pages(pdf_bytes: bytes, path: Path) -> tuple[list[list[_PageItem]], bool]:
+    """Prefer pdfplumber for table-aware extraction; fall back to pypdf if unavailable or failing."""
+    try:
+        return _extract_pdf_pages_pdfplumber(pdf_bytes, path)
+    except ValueError:
+        raise
+    except (ImportError, OSError, RuntimeError, TypeError, AttributeError, KeyError, IndexError):
+        return _extract_pdf_pages_pypdf(pdf_bytes, path)
+
+
+def _is_pdf_password_error(exc: BaseException, password_exc_cls: type[BaseException]) -> bool:
+    inner = exc.args[0] if exc.args else None
+    return isinstance(inner, password_exc_cls) or isinstance(exc.__cause__, password_exc_cls)
+
+
+def _extract_pdf_pages_pdfplumber(pdf_bytes: bytes, path: Path) -> tuple[list[list[_PageItem]], bool]:
+    import pdfplumber
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
+    from pdfminer.pdfparser import PDFSyntaxError
+    from pdfplumber.utils.exceptions import PdfminerException
+
+    try:
+        pdf_ctx = pdfplumber.open(io.BytesIO(pdf_bytes))
+    except PdfminerException as exc:
+        if _is_pdf_password_error(exc, PDFPasswordIncorrect):
+            raise ValueError(
+                f"PDF-файл защищён паролем и не может быть прочитан: {path}"
+            ) from exc
+        raise RuntimeError(str(exc)) from exc
+    except PDFPasswordIncorrect as exc:
+        raise ValueError(
+            f"PDF-файл защищён паролем и не может быть прочитан: {path}"
+        ) from exc
+    except PDFSyntaxError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    try:
+        with pdf_ctx as pdf:
+            if len(pdf.pages) == 0:
+                raise ValueError(f"В PDF-документе нет страниц: {path}")
+
+            has_images = False
+            pages_out: list[list[_PageItem]] = []
+            for page in pdf.pages:
+                if not has_images and bool(getattr(page, "images", None)):
+                    has_images = True
+                pages_out.append(_extract_pdfplumber_page(page))
+            return pages_out, has_images
+    except (PdfminerException, PDFSyntaxError) as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _extract_pdfplumber_page(page: object) -> list[_PageItem]:
+    page_w = float(getattr(page, "width", 0.0) or 0.0)
+    page_h = float(getattr(page, "height", 0.0) or 0.0)
+    page_area = page_w * page_h
+
+    raw_tables = page.find_tables()  # type: ignore[attr-defined]
+    accepted_tables: list[tuple[tuple[float, float, float, float], _PageTable]] = []
+
+    for tbl in raw_tables:
+        bbox = tuple(float(v) for v in tbl.bbox)
+        extracted = tbl.extract()
+        if not extracted:
+            continue
+        rows = _clean_pdfplumber_table(extracted)
+        if not rows:
+            continue
+        max_cols = max(len(r) for r in rows)
+        # Skip 1-column decorative frames or boxed code snippets.
+        if max_cols < 2:
+            continue
+        tbl_area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+        if page_area > 0 and tbl_area / page_area > 0.92 and len(rows) <= 1:
+            continue
+        accepted_tables.append((bbox, _PageTable(rows=rows)))
+
+    # Exclude characters inside accepted table bounding boxes so table text is not duplicated.
+    chars = list(getattr(page, "chars", ()) or ())
+    outside_chars = [
+        ch for ch in chars if not _char_in_any_bbox(ch, [bbox for bbox, _ in accepted_tables])
+    ]
+    text_entries = _group_chars_into_lines(outside_chars)
+
+    # Interleave text lines and tables in top-to-bottom reading order.
+    ordered: list[tuple[float, int, _PageItem]] = []
+    for top, page_line in text_entries:
+        ordered.append((top, 0, page_line))
+    for bbox, page_table in accepted_tables:
+        ordered.append((bbox[1], 1, page_table))
+    ordered.sort(key=lambda item: (item[0], item[1]))
+    return [item for _, _, item in ordered]
+
+
+def _clean_pdfplumber_table(extracted: list[list[str | None]]) -> list[list[str]]:
+    cleaned_rows: list[list[str]] = []
+    for raw_row in extracted:
+        cells: list[str] = []
+        for raw_cell in raw_row:
+            if raw_cell is None:
+                cells.append("")
+                continue
+            cell_text = _dehyphenate(_normalize_newlines(raw_cell))
+            cells.append(re.sub(r"\s+", " ", cell_text.strip()).replace("|", "/"))
+        if cells:
+            cleaned_rows.append(cells)
+    return cleaned_rows
+
+
+def _char_in_any_bbox(ch: dict[str, object], bboxes: list[tuple[float, float, float, float]]) -> bool:
+    if not bboxes:
+        return False
+    cx = (float(ch.get("x0", 0.0)) + float(ch.get("x1", 0.0))) / 2.0  # type: ignore[arg-type]
+    cy = (float(ch.get("top", 0.0)) + float(ch.get("bottom", 0.0))) / 2.0  # type: ignore[arg-type]
+    margin = 1.0
+    for x0, top, x1, bottom in bboxes:
+        if x0 - margin <= cx <= x1 + margin and top - margin <= cy <= bottom + margin:
+            return True
+    return False
+
+
+def _group_chars_into_lines(chars: list[dict[str, object]]) -> list[tuple[float, _PageLine]]:
+    """Cluster pdfplumber chars into lines by baseline (bottom) to avoid cross-size interleaving."""
+    if not chars:
+        return []
+
+    # Sort by baseline first, then left-to-right.
+    sorted_chars = sorted(
+        chars,
+        key=lambda c: (float(c.get("bottom", 0.0)), float(c.get("x0", 0.0))),  # type: ignore[arg-type]
+    )
+
+    clusters: list[tuple[float, list[dict[str, object]]]] = []
+    for ch in sorted_chars:
+        bottom = float(ch.get("bottom", 0.0))  # type: ignore[arg-type]
+        size = abs(float(ch.get("size", 10.0) or 10.0))  # type: ignore[arg-type]
+        tol = max(2.5, min(size * 0.3, 4.5))
+        if not clusters or abs(bottom - clusters[-1][0]) > tol:
+            clusters.append((bottom, [ch]))
+        else:
+            clusters[-1][1].append(ch)
+
+    result: list[tuple[float, _PageLine]] = []
+    prev_bottom: float | None = None
+    prev_size = 10.0
+
+    for baseline, line_chars in clusters:
+        line_chars.sort(key=lambda c: float(c.get("x0", 0.0)))  # type: ignore[arg-type]
+        parts: list[str] = []
+        size_weights: Counter[float] = Counter()
+        bold_chars = 0
+        total_chars = 0
+        prev_ch: dict[str, object] | None = None
+
+        for ch in line_chars:
+            txt = str(ch.get("text", "") or "")
+            if not txt:
+                continue
+            x0 = float(ch.get("x0", 0.0))  # type: ignore[arg-type]
+            size = round(abs(float(ch.get("size", 0.0) or 0.0)), 1)  # type: ignore[arg-type]
+
+            if prev_ch is not None:
+                prev_txt = str(prev_ch.get("text", "") or "")
+                prev_x0 = float(prev_ch.get("x0", 0.0))  # type: ignore[arg-type]
+                prev_x1 = float(prev_ch.get("x1", 0.0))  # type: ignore[arg-type]
+                prev_b = float(prev_ch.get("bottom", 0.0))  # type: ignore[arg-type]
+                # Skip duplicate fake-bold glyph overlays.
+                if txt == prev_txt and abs(x0 - prev_x0) < 0.8 and abs(baseline - prev_b) < 0.8:
+                    continue
+                gap = x0 - prev_x1
+                ref_size = min(size, abs(float(prev_ch.get("size", size) or size)))  # type: ignore[arg-type]
+                space_gap = max(1.5, ref_size * 0.22)
+                if not txt.isspace() and not prev_txt.isspace() and gap > space_gap:
+                    parts.append(" ")
+
+            parts.append(" " if txt.isspace() else txt)
+            if not txt.isspace():
+                if size > 0:
+                    size_weights[size] += len(txt)
+                fontname = str(ch.get("fontname", "") or "").lower()
+                if any(tok in fontname for tok in ("bold", "black", "heavy", "demi", "semibold")):
+                    bold_chars += len(txt)
+                total_chars += len(txt)
+            prev_ch = ch
+
+        line_text = re.sub(r"[ \t]{2,}", " ", "".join(parts)).strip()
+        if not line_text:
+            continue
+
+        top = min(float(c.get("top", baseline)) for c in line_chars)  # type: ignore[arg-type]
+        dom_size = size_weights.most_common(1)[0][0] if size_weights else None
+        is_bold = total_chars > 0 and (bold_chars / total_chars) >= 0.7
+
+        if prev_bottom is not None and (baseline - prev_bottom) > max(prev_size * 1.9, 18.0):
+            result.append((prev_bottom + 0.1, _PageLine(text="")))
+
+        result.append((top, _PageLine(text=line_text, font_size=dom_size, bold=is_bold)))
+        prev_bottom = baseline
+        if dom_size:
+            prev_size = dom_size
+
+    return result
+
+
+def _extract_pdf_pages_pypdf(pdf_bytes: bytes, path: Path) -> tuple[list[list[_PageItem]], bool]:
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+    except (PdfReadError, OSError, ValueError) as exc:
+        raise ValueError(f"Не удалось прочитать PDF-файл {path.name}: {exc}") from exc
+
+    if reader.is_encrypted:
+        try:
+            decrypted = reader.decrypt("")
+        except Exception as exc:
+            raise ValueError(
+                f"PDF-файл защищён паролем и не может быть прочитан: {path}"
+            ) from exc
+        if not decrypted:
+            raise ValueError(f"PDF-файл защищён паролем и не может быть прочитан: {path}")
+
+    if len(reader.pages) == 0:
+        raise ValueError(f"В PDF-документе нет страниц: {path}")
+
+    has_images = False
+    raw_pages: list[list[_PageItem]] = []
+    for page in reader.pages:
+        if not has_images and _pdf_page_has_images(page):
+            has_images = True
+        raw_pages.append(list(_extract_pdf_page_lines(page)))
+    return raw_pages, has_images
+
+
+def _merge_split_pdf_tables(pages: list[list[_PageItem]]) -> list[list[_PageItem]]:
+    """Merge a table split across consecutive PDF pages into a single table."""
+    if len(pages) < 2:
+        return pages
+
+    merged: list[list[_PageItem]] = [list(page) for page in pages]
+    for idx in range(len(merged) - 1):
+        prev_page = merged[idx]
+        next_page = merged[idx + 1]
+
+        prev_pos = _last_non_empty_index(prev_page)
+        next_pos = _first_non_empty_index(next_page)
+        if prev_pos is None or next_pos is None:
+            continue
+
+        prev_item = prev_page[prev_pos]
+        next_item = next_page[next_pos]
+        if not (isinstance(prev_item, _PageTable) and isinstance(next_item, _PageTable)):
+            continue
+        if not prev_item.rows or not next_item.rows:
+            continue
+        if len(prev_item.rows[0]) != len(next_item.rows[0]):
+            continue
+
+        continuation = next_item.rows[1:] if next_item.rows[0] == prev_item.rows[0] else next_item.rows
+        prev_item.rows.extend(continuation)
+        del next_page[next_pos]
+
+    return merged
+
+
+def _first_non_empty_index(items: list[_PageItem]) -> int | None:
+    for idx, item in enumerate(items):
+        if isinstance(item, _PageTable) or item.text.strip():
+            return idx
+    return None
+
+
+def _last_non_empty_index(items: list[_PageItem]) -> int | None:
+    for idx in range(len(items) - 1, -1, -1):
+        item = items[idx]
+        if isinstance(item, _PageTable) or item.text.strip():
+            return idx
+    return None
+
+
+def _render_pdf_page(items: list[_PageItem]) -> str:
+    """Render interleaved PDF text lines and tables into markdown text."""
+    chunks: list[str] = []
+    line_buf: list[str] = []
+
+    def flush_lines() -> None:
+        if not line_buf:
+            return
+        text = _dehyphenate("\n".join(line_buf)).strip()
+        if text:
+            chunks.append(text)
+        line_buf.clear()
+
+    for item in items:
+        if isinstance(item, _PageTable):
+            flush_lines()
+            if not item.rows:
+                continue
+            table_lines = [
+                "| " + " | ".join(item.rows[0]) + " |",
+                "|" + "---|" * len(item.rows[0]),
+                *("| " + " | ".join(row) + " |" for row in item.rows[1:]),
+            ]
+            chunks.append("\n".join(table_lines))
+        else:
+            line_buf.append(_normalize_pdf_line(item.text))
+
+    flush_lines()
+    return "\n\n".join(chunks)
 
 
 def _pdf_page_has_images(page: object) -> bool:
@@ -553,7 +854,7 @@ def _normalize_header_key(text: str) -> str:
     return re.sub(r"\d+", "#", collapsed)
 
 
-def _strip_repeated_headers_footers(pages: list[list[_PageLine]]) -> list[list[_PageLine]]:
+def _strip_repeated_headers_footers(pages: list[list[_PageItem]]) -> list[list[_PageItem]]:
     """Remove repeated headers/footers and standalone page numbers across multi-page PDFs."""
     num_pages = len(pages)
     if num_pages < 2:
@@ -566,7 +867,11 @@ def _strip_repeated_headers_footers(pages: list[list[_PageLine]]) -> list[list[_
     footer_exact: Counter[str] = Counter()
 
     for page in pages:
-        non_empty = [ln.text.strip() for ln in page if ln.text.strip()]
+        non_empty = [
+            item.text.strip()
+            for item in page
+            if isinstance(item, _PageLine) and item.text.strip()
+        ]
         if not non_empty:
             continue
         top = non_empty[:edge_window]
@@ -606,22 +911,32 @@ def _strip_repeated_headers_footers(pages: list[list[_PageLine]]) -> list[list[_
             )
         return counts[key] >= threshold
 
-    cleaned_pages: list[list[_PageLine]] = []
+    cleaned_pages: list[list[_PageItem]] = []
     for page in pages:
-        non_empty_indices = [idx for idx, ln in enumerate(page) if ln.text.strip()]
+        non_empty_indices = [
+            idx
+            for idx, item in enumerate(page)
+            if isinstance(item, _PageLine) and item.text.strip()
+        ]
         if not non_empty_indices:
             cleaned_pages.append(page)
             continue
 
         drop_indices: set[int] = set()
         for idx in non_empty_indices[:edge_window]:
-            if is_repeated(page[idx].text.strip(), header_counts, header_exact):
+            line_item = page[idx]
+            if isinstance(line_item, _PageLine) and is_repeated(
+                line_item.text.strip(), header_counts, header_exact
+            ):
                 drop_indices.add(idx)
         for idx in non_empty_indices[-edge_window:]:
-            if is_repeated(page[idx].text.strip(), footer_counts, footer_exact):
+            line_item = page[idx]
+            if isinstance(line_item, _PageLine) and is_repeated(
+                line_item.text.strip(), footer_counts, footer_exact
+            ):
                 drop_indices.add(idx)
 
-        cleaned_pages.append([ln for idx, ln in enumerate(page) if idx not in drop_indices])
+        cleaned_pages.append([item for idx, item in enumerate(page) if idx not in drop_indices])
 
     return cleaned_pages
 
@@ -649,14 +964,16 @@ def _normalize_pdf_line(line: str) -> str:
     return _BULLET_LINE_RE.sub(r"\1- ", stripped)
 
 
-def _apply_pdf_heading_heuristics(pages: list[list[_PageLine]]) -> list[list[_PageLine]]:
+def _apply_pdf_heading_heuristics(pages: list[list[_PageItem]]) -> list[list[_PageItem]]:
     """Promote likely PDF headings to markdown '#' lines using font sizes and text patterns."""
-    all_lines = [ln for page in pages for ln in page]
     size_weights: Counter[float] = Counter()
-    for ln in all_lines:
-        stripped = ln.text.strip()
-        if stripped and ln.font_size and ln.font_size > 0:
-            size_weights[ln.font_size] += len(stripped)
+    for page in pages:
+        for item in page:
+            if not isinstance(item, _PageLine):
+                continue
+            stripped = item.text.strip()
+            if stripped and item.font_size and item.font_size > 0:
+                size_weights[item.font_size] += len(stripped)
 
     body_size = _weighted_median(size_weights) if size_weights else None
     heading_size_to_level: dict[float, int] = {}
@@ -677,22 +994,29 @@ def _apply_pdf_heading_heuristics(pages: list[list[_PageLine]]) -> list[list[_Pa
                 heading_size_to_level[s] = level
 
     has_h1 = False
-    out_pages: list[list[_PageLine]] = []
+    out_pages: list[list[_PageItem]] = []
     for page in pages:
-        out_page: list[_PageLine] = []
-        non_empty = [(idx, ln.text.strip()) for idx, ln in enumerate(page) if ln.text.strip()]
+        out_page: list[_PageItem] = []
+        non_empty = [
+            (idx, item.text.strip())
+            for idx, item in enumerate(page)
+            if isinstance(item, _PageLine) and item.text.strip()
+        ]
         pos_in_non_empty = {idx: pos for pos, (idx, _) in enumerate(non_empty)}
 
-        for idx, ln in enumerate(page):
-            stripped = ln.text.strip()
+        for idx, item in enumerate(page):
+            if not isinstance(item, _PageLine):
+                out_page.append(item)
+                continue
+            stripped = item.text.strip()
             if not stripped or _MD_HEADING_RE.match(stripped):
                 if _MD_HEADING_RE.match(stripped) and stripped.startswith("# "):
                     has_h1 = True
-                out_page.append(ln)
+                out_page.append(item)
                 continue
 
             level = _detect_heading_level(
-                ln,
+                item,
                 stripped,
                 heading_size_to_level,
                 non_empty,
@@ -705,12 +1029,12 @@ def _apply_pdf_heading_heuristics(pages: list[list[_PageLine]]) -> list[list[_Pa
                 out_page.append(
                     _PageLine(
                         text=f"{'#' * level} {stripped}",
-                        font_size=ln.font_size,
-                        bold=ln.bold,
+                        font_size=item.font_size,
+                        bold=item.bold,
                     )
                 )
             else:
-                out_page.append(ln)
+                out_page.append(item)
         out_pages.append(out_page)
 
     return out_pages

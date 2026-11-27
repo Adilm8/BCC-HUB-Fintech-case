@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from validator.config import Settings
+from validator.config import Settings, family
 from validator.llm import LLMClient
 from validator.pipeline.structured import Budget, StageCache, StructuredResult, call_structured
 
@@ -44,9 +44,9 @@ class StageContext:
     def temperature(self, stage: str) -> float | None:
         # the paid provider's model rejects a sampling temperature, and the newest free models degrade at low
         # temperatures: send (and hash) none for them
-        provider = getattr(self.client, "provider", "")
+        provider = family(getattr(self.client, "provider", ""))
         model = getattr(self.client, "model", "") or ""
-        if provider == "anthropic" or model.startswith("gemini-3"):
+        if provider != "gemini" or model.startswith("gemini-3"):
             return None
         return TEMPERATURE.get(stage)
 

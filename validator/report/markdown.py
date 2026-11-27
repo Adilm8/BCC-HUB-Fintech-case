@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from validator.config import SEQUENTIAL_PROVIDERS
 from validator.models import (
     SEVERITY_RANK,
     BaseFinding,
@@ -217,7 +218,7 @@ def _render_passport(report: Report) -> list[str]:
             )
         by_key = {s.key: s for s in run.stages}
         check, set_check = by_key.get("check"), by_key.get("set_check")
-        sequential = run.provider == "gemini" or run.profile == "economy"  # one call at a time
+        sequential = run.provider in SEQUENTIAL_PROVIDERS or run.profile == "economy"  # one call at a time
         if check and set_check and check.llm_calls and set_check.llm_calls and not sequential:
             lines.extend([
                 "",
@@ -288,7 +289,7 @@ def _render_slicing(report: Report) -> list[str]:
         for req in report.requirements:
             title = _short(req.title)
             nt, nq = _norm(req.title), _norm(req.quote)
-            same = nt == nq or (nt and nq.startswith(nt)) or (nq and nt.startswith(nq))
+            same = nt == nq
             quote_cell = "совпадает с формулировкой" if same and len(req.quote) <= 120 else req.quote
             lines.append(
                 f"| {_escape_cell(req.id)} "
@@ -433,7 +434,7 @@ def _render_per_requirement(report: Report) -> list[str]:
             lines.append(f"- **Затронуто в наборе:** {', '.join(set_refs[req.id])}")
         if also_in.get(req.id):
             lines.append(f"- **Касается и этого требования:** {', '.join(also_in[req.id])} (карточка выше)")
-        if not req_findings:
+        if not req_findings and req.check_status != "not_checked":
             lines.append("")
             continue
 

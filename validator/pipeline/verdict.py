@@ -116,8 +116,9 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
     every = _all(findings, set_findings)
     known = {r.id for r in reqs}
     # counted the same way the report shows them: own findings vs set-level findings only
-    with_findings = {r for f in findings for r in f.requirement_ids} & known
-    in_sets = {r for f in set_findings for r in f.requirement_ids} & known
+    checked = {r.id for r in reqs if r.check_status == "checked"}
+    with_findings = {r for f in findings for r in f.requirement_ids} & known & checked
+    in_sets = {r for f in set_findings for r in f.requirement_ids} & known & checked
     critical = [f for f in every if f.severity == Severity.CRITICAL]
     by_class: dict[str, list[str]] = {}
     for cls in CLASS_ORDER:
@@ -136,8 +137,7 @@ def build_summary(reqs: list[Requirement], findings: list[Finding], set_findings
         questions_in_findings=sum(1 for f in every if f.clarifying_question.strip()),
         candidates_by_source=dict(candidates or {}),
         dropped_unconfirmed=dropped_unconfirmed,
-        requirements_not_checked=sum(1 for r in reqs if r.check_status == "not_checked"
-                                     and r.id not in with_findings and r.id not in in_sets),
+        requirements_not_checked=sum(1 for r in reqs if r.check_status == "not_checked"),
         findings_total=len(every),
         findings_by_severity={s.value: sum(1 for f in every if f.severity == s) for s in Severity},
         findings_by_criterion=dict(Counter(f.criterion.value for f in every)),
@@ -168,7 +168,30 @@ def _short_title(f: AnyFinding, limit: int = 400) -> str:
 
 def build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],
                   coverage: list[CoverageRow], *, critic_order: list[str] | None = None,
-                  rationale: str = "") -> Verdict:
+                  rationale: str = "", run_status: str = "complete") -> Verdict:
+    verdict = _build_verdict(reqs, findings, set_findings, coverage, critic_order=critic_order, rationale=rationale)
+    unchecked = sum(1 for r in reqs if r.check_status == "not_checked")
+    if run_status == "rules_only":
+        # nothing was checked by the model: no permission to start, whatever the rules found
+        return verdict.model_copy(update={
+            "development": Readiness.NO, "testing": Readiness.NO,
+            "headline": "Начинать разработку нельзя: модель не отработала, выполнены только проверки по правилам. "
+                        "Повторите запуск."})
+    if run_status == "partial" or unchecked:
+        cap = {"development": verdict.development, "testing": verdict.testing}
+        for k, v in cap.items():
+            if v == Readiness.YES:
+                cap[k] = Readiness.CONDITIONAL
+        if cap != {"development": verdict.development, "testing": verdict.testing}:
+            reason = (f"не проверено требований: {unchecked}" if unchecked else "часть этапов модели не выполнена")
+            return verdict.model_copy(update={
+                **cap, "headline": f"Начинать можно только с условием: отчёт неполный ({reason})."})
+    return verdict
+
+
+def _build_verdict(reqs: list[Requirement], findings: list[Finding], set_findings: list[SetFinding],
+                   coverage: list[CoverageRow], *, critic_order: list[str] | None = None,
+                   rationale: str = "") -> Verdict:
     every = _all(findings, set_findings)
     critical = [f for f in every if f.severity == Severity.CRITICAL]
     major = [f for f in every if f.severity == Severity.MAJOR]

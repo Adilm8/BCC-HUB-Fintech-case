@@ -50,6 +50,7 @@ class QuoteMatch:
     block_ids: list[str]
     status: QuoteStatus
     score: float = 1.0
+    section_id: str | None = None  # set when the quote is a section heading
 
 
 class QuoteIndex:
@@ -123,7 +124,21 @@ class QuoteIndex:
             return None
         if len(fragments) > 1:
             return self._find_fragments(fragments, prefer_blocks)
-        return self._find_one(fragments[0], prefer_blocks, fuzzy=fuzzy)
+        found = self._find_one(fragments[0], prefer_blocks, fuzzy=fuzzy)
+        return found or self._find_heading(fragments[0])
+
+    def _find_heading(self, quote: str) -> QuoteMatch | None:
+        """A quote of a section heading is document text too (headings are not blocks)."""
+        nq = normalize(quote).strip(" .,;:#").strip()
+        if len(nq) < 3:
+            return None
+        hits = [s for s in self.doc.sections if s.title and normalize(s.title).strip(" .,;:") == nq]
+        if not hits:
+            hits = [s for s in self.doc.sections if s.title and len(nq) >= SHORT_QUOTE and nq in normalize(s.title)]
+        if len(hits) != 1:
+            return None
+        s = hits[0]
+        return QuoteMatch(s.title, list(s.block_ids[:1]), QuoteStatus.VERIFIED, 1.0, section_id=s.id)
 
     def _find_one(self, quote: str, prefer: list[str] | None, *, fuzzy: bool) -> QuoteMatch | None:
         # list and table markers the model copies from the rendered prompt are not document text

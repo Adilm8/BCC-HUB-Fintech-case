@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
-from validator.config import Settings
+from validator.config import Settings, extra_provider_module
 
 ErrorKind = Literal[
     "quota_daily", "rate_limit", "timeout", "server", "auth", "bad_request", "invalid_json", "network", "refusal",
@@ -38,9 +38,21 @@ def _code(low: str, *codes: int) -> bool:
     return any(re.search(rf"(?<![\d.]){c}(?![\d.])", low) for c in codes)
 
 
+_KNOWN_SECRETS: list[str] = []
+
+
+def register_secret(value: str) -> None:
+    """Exact values (the configured key) that are always masked in messages."""
+    if value and len(value) >= 6 and value not in _KNOWN_SECRETS:
+        _KNOWN_SECRETS.append(value)
+
+
 def short_error(exc: BaseException, limit: int = 200) -> str:
     """First line of the error, without keys or tokens: safe to show in a report."""
     first = (str(exc).strip().splitlines() or [""])[0]
+    for secret in _KNOWN_SECRETS:
+        first = first.replace(secret, "***")
+    first = re.sub(r"(x-(?:goog-)?api-key['\"]?\s*[:=]\s*['\"]?)[^'\"\s,]+", r"\1***", first, flags=re.IGNORECASE)
     first = _SECRET.sub("***", first)
     text = f"{type(exc).__name__}: {first}" if not isinstance(exc, LLMError) else first
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -85,6 +97,8 @@ def classify_error(exc: BaseException) -> ErrorKind:
         return exc.kind
     if isinstance(exc, TimeoutError):
         return "timeout"
+    if isinstance(exc, UnicodeEncodeError):
+        return "auth"  # a key with non-ASCII characters cannot go into an HTTP header
     msg = f"{type(exc).__name__}: {exc}"
     low = msg.lower()
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
@@ -138,6 +152,7 @@ class LLMClient:
 
     def __init__(self, settings: Settings):
         self._settings = settings
+        register_secret(settings.api_key)
         self.last_model: str | None = None  # only for generate()
         self._lock = threading.Lock()
         self._exhausted: set[str] = set()  # models that hit the daily quota in this process
@@ -164,7 +179,9 @@ class LLMClient:
         models = [m for m in (self._settings.model, *self._settings.fallback_models)]
         with self._lock:
             alive = [m for m in models if m not in self._exhausted]
-        return alive or models[-1:]
+        if not alive:
+            raise LLMError("исчерпана дневная квота всех моделей", "quota_daily")
+        return alive
 
     def complete(
         self,
@@ -412,4 +429,7 @@ def _mentions_schema(exc: BaseException) -> bool:
 def make_client(settings: Settings) -> LLMClient:
     if settings.provider == "anthropic":
         return AnthropicClient(settings)
+    extra = extra_provider_module()
+    if extra is not None and settings.provider == getattr(extra, "NAME", None):
+        return extra.make_client(settings)
     return GeminiClient(settings)

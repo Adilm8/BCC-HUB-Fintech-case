@@ -149,11 +149,11 @@ def test_daily_quota_switches_to_fallback_without_waiting(monkeypatch):
     assert any("дневная квота" in n for n in r.notes) and any("запасную модель" in n for n in r.notes)
 
 
-def test_gemini_gets_the_rule_pair_call_within_seven_calls():
+def test_gemini_runs_within_seven_calls_without_a_separate_pair_call():
     fake = SequentialFake()
     rep = run_pipeline(raw_doc(), settings(), client=fake)
     prompts = [p for s, p in fake.calls if s == "set"]
-    assert any("S1b" in p for p in prompts)
+    assert not any("S1b" in p for p in prompts)  # the rule-pair lens lives inside S1
     assert rep.run.llm_calls <= 7
 
 
@@ -175,3 +175,63 @@ def test_linter_flags_code_declared_but_other_code_prescribed_under_its_heading(
     found = [f for f in run_prechecks(doc).findings if f.rule == "api_status_code_conflict"]
     assert found and found[0].severity == "critical"
     assert "403" in found[0].explanation and "404" in found[0].explanation
+
+
+def test_default_gemini_fallback(monkeypatch):
+    from validator.config import Settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.delenv("GEMINI_FALLBACK_MODELS", raising=False)
+    assert Settings.from_env().fallback_models == ("gemini-3.5-flash-lite",)
+    monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "")
+    assert Settings.from_env().fallback_models == ()
+
+
+
+def test_extra_provider_hook(tmp_path, monkeypatch):
+    from validator import config
+    from validator.config import Settings
+    from validator.llm import make_client
+
+    mod = tmp_path / "extra.py"
+    mod.write_text(
+        "from tests.fakes import FakeLLM\n"
+        "NAME = 'devlocal'\nCONFIG = ('', 'DEVLOCAL_MODEL', 'm-dev', 'DEVLOCAL_FALLBACK')\n"
+        "FAMILY = 'gemini'\nTIMEOUT = 11.0\nDEADLINE = 22.0\n"
+        "def make_client(settings):\n    return FakeLLM(model=settings.model)\n", encoding="utf-8")
+    monkeypatch.setattr(config, "_EXTRA", None)
+    monkeypatch.setenv("VALIDATOR_EXTRA_PROVIDER", str(mod))
+    monkeypatch.setenv("LLM_PROVIDER", "devlocal")
+    s = Settings.from_env()
+    assert s.provider == "devlocal" and s.model == "m-dev" and s.attempt_timeout == 11.0
+    assert config.family("devlocal") == "gemini" and "devlocal" in config.SEQUENTIAL_PROVIDERS
+    assert make_client(s).model == "m-dev"
+
+
+def test_all_models_out_of_quota_fail_at_once(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    c = Scripted(_settings(), [RuntimeError(PER_DAY), RuntimeError(PER_DAY)])
+    with pytest.raises(LLMError):
+        c.complete("p")
+    with pytest.raises(LLMError) as e:
+        c.complete("p")  # no model left: no new request at all
+    assert e.value.kind == "quota_daily" and c.models_called == ["m1", "m2"]
+
+
+def test_fatal_error_skips_waiting_wave_tasks():
+    from tests.fakes import quota_error
+
+    fake = SequentialFake({"set": quota_error()})
+    rep = run_pipeline(raw_doc(), settings(), client=fake)
+    assert not any(s == "check" for s, _ in fake.calls)  # check batches were not started after the fatal error
+    assert rep.verdict.development != "yes"
+
+
+def test_non_ascii_key_is_rejected(monkeypatch):
+    from validator.config import Settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "ваш_ключ")
+    with pytest.raises(ValueError, match="недопустимые"):
+        Settings.from_env()

@@ -69,7 +69,9 @@ def main(argv: list[str] | None = None) -> int:
         # worker threads may sit in a network call; do not wait for them
         os._exit(130)
     except Exception as exc:  # noqa: BLE001 - last line of defence: a message instead of a traceback
-        print(f"Непредвиденная ошибка: {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr)
+        from validator.llm import short_error
+
+        print(f"Непредвиденная ошибка: {short_error(exc, 300)}", file=sys.stderr)
         return 2
 
 

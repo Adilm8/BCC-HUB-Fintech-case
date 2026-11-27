@@ -8,11 +8,55 @@ PROVIDERS = {
     "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL", "gemini-3.5-flash", "GEMINI_FALLBACK_MODELS"),
     "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "claude-sonnet-5-5", "ANTHROPIC_FALLBACK_MODELS"),
 }
+# fallback models used when the environment does not name any
+DEFAULT_FALLBACKS: dict[str, tuple[str, ...]] = {"gemini": ("gemini-3.5-flash-lite",)}
+# providers that answer one call at a time
+SEQUENTIAL_PROVIDERS = {"gemini"}
+# a provider added through the extension hook behaves like one of the built-in ones
+PROVIDER_FAMILY: dict[str, str] = {}
 
 DEFAULT_PROFILE = {"gemini": "standard", "anthropic": "standard"}
 DEFAULT_TIMEOUT = {"gemini": 240.0, "anthropic": 300.0}  # one attempt, seconds
 # the free tier answers slower and runs calls one by one: it needs a longer run
 DEFAULT_DEADLINE = {"gemini": 900.0, "anthropic": 480.0}
+
+
+def family(provider: str) -> str:
+    """The built-in provider whose behaviour (scheduling, profile choices) this provider follows."""
+    return PROVIDER_FAMILY.get(provider, provider)
+
+
+_EXTRA = None
+
+
+def extra_provider_module():
+    """Optional extra provider for local testing: a Python file named by VALIDATOR_EXTRA_PROVIDER.
+
+    The module defines NAME, CONFIG (key, model, default model, fallback variables), FAMILY, TIMEOUT, DEADLINE and
+    make_client(settings). Nothing is loaded when the variable is not set."""
+    global _EXTRA
+    path = os.getenv("VALIDATOR_EXTRA_PROVIDER", "").strip()
+    if not path:
+        return None
+    if _EXTRA is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("validator_extra_provider", path)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"не удалось загрузить дополнительный провайдер: {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        name = module.NAME
+        PROVIDERS[name] = tuple(module.CONFIG)
+        PROVIDER_FAMILY[name] = getattr(module, "FAMILY", name)
+        fam = PROVIDER_FAMILY[name]
+        DEFAULT_PROFILE[name] = DEFAULT_PROFILE.get(fam, "standard")
+        DEFAULT_TIMEOUT[name] = float(getattr(module, "TIMEOUT", DEFAULT_TIMEOUT.get(fam, 240.0)))
+        DEFAULT_DEADLINE[name] = float(getattr(module, "DEADLINE", DEFAULT_DEADLINE.get(fam, 480.0)))
+        if fam in SEQUENTIAL_PROVIDERS:
+            SEQUENTIAL_PROVIDERS.add(name)
+        _EXTRA = module
+    return _EXTRA
 
 
 @dataclass(frozen=True)
@@ -91,12 +135,20 @@ class Settings:
     def from_env(cls) -> Settings:
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         if provider not in PROVIDERS:
+            extra_provider_module()
+        if provider not in PROVIDERS:
             raise ValueError(f"провайдер {provider!r} не поддерживается, доступны: {', '.join(PROVIDERS)}")
         key_var, model_var, default_model, fallback_var = PROVIDERS[provider]
-        key = os.getenv(key_var, "").strip()
-        if not key:
+        key = os.getenv(key_var, "").strip() if key_var else ""
+        if key_var and not key:
             raise ValueError(f"не задан {key_var}: скопируйте .env.example в .env и впишите ключ")
-        fallbacks = tuple(m.strip() for m in os.getenv(fallback_var, "").split(",") if m.strip())
+        if key and not key.isascii():
+            raise ValueError(f"{key_var} содержит недопустимые символы: впишите настоящий ключ вместо примера")
+        raw_fallbacks = os.getenv(fallback_var)
+        if raw_fallbacks is None:
+            fallbacks = DEFAULT_FALLBACKS.get(provider, ())
+        else:  # an explicitly empty value means "no fallback model"
+            fallbacks = tuple(m.strip() for m in raw_fallbacks.split(",") if m.strip())
         profile = os.getenv("PIPELINE_PROFILE", "").strip().lower() or DEFAULT_PROFILE[provider]
         if profile not in PROFILES:
             raise ValueError(f"профиль {profile!r} не поддерживается, доступны: {', '.join(PROFILES)}")

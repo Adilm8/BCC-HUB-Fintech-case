@@ -337,3 +337,91 @@ def test_loads_pdf_fixture():
     assert "Ф-1." in raw.text
     assert "Ф-4." in raw.text
     assert "cardId" in raw.text
+
+
+def test_loads_real_tables_pdf_without_literal_pipes():
+    from pypdf import PdfReader
+
+    from validator.models import BlockKind
+    from validator.structure import parse_structure
+
+    pdf_path = FIXTURES_DOCS / "requirements_tables.pdf"
+    # Verify the fixture itself has zero literal pipe characters when read as raw text.
+    raw_pypdf_text = "\n".join(pg.extract_text() or "" for pg in PdfReader(str(pdf_path)).pages)
+    assert "|" not in raw_pypdf_text
+
+    raw = load_document(pdf_path)
+    assert raw.format == "pdf"
+    assert raw.title == "Уведомление о расходах по карте"
+    assert "Спецификация требований — копия для проверки" not in raw.text
+    assert "Страница 1 из" not in raw.text
+    assert raw.text.count("Провести покупку на 1 500 ₸") == 1
+
+    doc = parse_structure(raw)
+    assert doc.parts == ["Часть A. Новый функционал", "Часть B. REST API"]
+    assert [b.doc_id for b in doc.blocks if b.doc_id] == ["Ф-1", "Ф-2", "Ф-3", "Ф-4"]
+
+    # Acceptance-criteria table extracted as pipe table with exact header and cells.
+    ac_blocks = [b for b in doc.blocks if b.section_path[-1] == "Критерии приемки"]
+    ac_headers = [b for b in ac_blocks if b.kind == BlockKind.TABLE_HEADER]
+    ac_rows = [b for b in ac_blocks if b.kind == BlockKind.TABLE_ROW]
+    assert len(ac_headers) == 1
+    assert ac_headers[0].cells == ["Исходные условия", "Действие", "Ожидаемый результат"]
+    assert [r.cells for r in ac_rows] == [
+        ["Расходы 48 500 ₸, порог 50 000 ₸", "Провести покупку на 1 500 ₸", "Итог 50 000 ₸ и один push"],
+        [
+            "Покупка 31 января в 23:58 на 4 000 ₸",
+            "Провести 1 февраля в 00:03 по Алматы",
+            "Февральский счётчик вырос на 4 000 ₸",
+        ],
+        ["Расходы 19 900 ₸, порог 20 000 ₸", "Перевести 500 ₸", "Счётчик показывает 19 900 ₸"],
+    ]
+
+    # Query-parameters table extracted as 7-column pipe table with exact header and cells.
+    qp_blocks = [b for b in doc.blocks if b.section_path[-1] == "Query-параметры"]
+    qp_headers = [b for b in qp_blocks if b.kind == BlockKind.TABLE_HEADER]
+    qp_rows = [b for b in qp_blocks if b.kind == BlockKind.TABLE_ROW]
+    assert len(qp_headers) == 1
+    assert qp_headers[0].cells == [
+        "Parameter",
+        "Format",
+        "Size",
+        "Mandatory",
+        "Logic",
+        "Description",
+        "DB field",
+    ]
+    assert [r.cells for r in qp_rows] == [
+        ["cardId", "string", "1–64", "Да", "Карта клиента", "Идентификатор карты", "card_id"],
+        ["amount", "integer", "32 bit", "Да", "1 000–1 000 000", "Порог в тенге", "limit_kzt"],
+        ["enabled", "integer", "1 знак", "Да", "0 или 1", "Признак включения", "enabled"],
+    ]
+
+    # Multi-page review checklist table merged intact across page break, and empty signoff row kept.
+    review_rows = [
+        b
+        for b in doc.blocks
+        if b.section_path[-1] == "Ревью требований" and b.kind == BlockKind.TABLE_ROW
+    ]
+    assert len(review_rows) == 14
+    signoff_rows = [
+        b
+        for b in doc.blocks
+        if b.section_path[-1] == "Блок согласующих" and b.kind == BlockKind.TABLE_ROW
+    ]
+    assert any(r.cells == ["", "", ""] for r in signoff_rows)
+
+
+def test_pdf_falls_back_to_pypdf_when_pdfplumber_unavailable(monkeypatch):
+    import validator.loaders as loaders_mod
+
+    def _boom(*_args, **_kwargs):
+        raise ImportError("simulated missing pdfplumber")
+
+    monkeypatch.setattr(loaders_mod, "_extract_pdf_pages_pdfplumber", _boom)
+    raw = load_document(FIXTURES_DOCS / "requirements.pdf")
+    assert raw.format == "pdf"
+    assert raw.title == "Уведомление о расходах по карте"
+    assert "## Часть A. Новый функционал" in raw.text
+    assert "## Часть B. REST API" in raw.text
+    assert "Ф-1." in raw.text

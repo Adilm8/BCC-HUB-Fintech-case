@@ -33,9 +33,20 @@ def test_verdict_conditional_without_critical():
 
 def test_verdict_testing_no_without_acceptance_criteria():
     rep = load()
-    reqs = [r for r in rep.requirements if r.kind != "acceptance_criterion"]
+    reqs = [r.model_copy(update={"check_status": "checked"}) for r in rep.requirements
+            if r.kind != "acceptance_criterion"]
     v = build_verdict(reqs, [], [], [])
     assert v.development == "yes" and v.testing == "no"
+
+
+def test_verdict_follows_the_run_status():
+    rep = load()
+    reqs = [r.model_copy(update={"check_status": "checked"}) for r in rep.requirements]
+    assert build_verdict(reqs, [], [], [], run_status="rules_only").development == "no"
+    v = build_verdict(reqs, [], [], [], run_status="partial")
+    assert v.development == "conditional" and "неполный" in v.headline
+    unchecked = build_verdict(rep.requirements, [], [], [])  # one requirement was not checked
+    assert unchecked.development == "conditional"
 
 
 def test_critic_order_is_used_when_valid():
@@ -52,7 +63,7 @@ def test_questions_blocking_first_and_summary_counts():
     s = build_summary(rep.requirements, rep.findings, rep.set_findings, qs, dropped_unverified=2, dropped_by_review=0)
     assert s.findings_total == 4 and s.critical_ids == ["S-001"]
     assert s.critical_by_class == {"contradictory": ["S-001"]}
-    assert s.requirements_not_checked == 0  # the unchecked one is touched by a set finding
+    assert s.requirements_not_checked == 1  # counted strictly by its status
     total = s.requirements_with_findings + s.requirements_in_set_findings_only + s.requirements_clean
     assert total + s.requirements_not_checked == s.requirements_total
 
